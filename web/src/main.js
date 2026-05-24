@@ -35,6 +35,7 @@ import md5 from 'js-md5'
 // websocket
 import websocket from '@/api/websocket'
 import util from '@/libs/util'
+import config from '@/libs/util.config'
 import VueCoreVideoPlayer from 'vue-core-video-player'
 // 引入echarts
 import * as echarts from 'echarts' // 注册echarts组件
@@ -49,6 +50,11 @@ Vue.prototype.$md5 = md5
 Vue.prototype.$util = util
 Vue.prototype.$websocket = websocket
 Vue.prototype.$echarts = echarts
+Vue.prototype.$config = config
+
+// 在应用初始化前执行配置校验
+const validationResult = config.validateAll()
+
 new Vue({
   router,
   store,
@@ -60,6 +66,10 @@ new Vue({
     this.$store.dispatch('d2admin/dictionary/load')
   },
   created () {
+    // 在开发环境显示错误提示
+    if (config.isDevelopment()) {
+      config.showDevErrors()
+    }
 
     // 处理路由 得到每一级的路由设置
     // this.$store.commit('d2admin/page/init', frameInRoutes)
