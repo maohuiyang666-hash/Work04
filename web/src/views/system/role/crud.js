@@ -19,7 +19,7 @@ export const crudOptions = (vm) => {
           return !vm.hasPermissions('Retrieve')
         }
       },
-      width: 230,
+      width: 300,
       edit: {
         thin: true,
         text: '',
@@ -45,6 +45,17 @@ export const crudOptions = (vm) => {
         type: 'warning',
         size: 'small',
         emit: 'createPermission'
+      }, {
+        show (index, row) {
+          return true
+        },
+        disabled () {
+          return !vm.hasPermissions('Create')
+        },
+        text: '复制',
+        type: 'info',
+        size: 'small',
+        emit: 'copyRole'
       }]
 
     },

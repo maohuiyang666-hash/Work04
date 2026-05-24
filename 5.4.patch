@@ -1,0 +1,175 @@
+diff --git a/backend/dvadmin/system/views/role.py b/backend/dvadmin/system/views/role.py
+index 727e355b..d11d36e4 100644
+--- a/backend/dvadmin/system/views/role.py
++++ b/backend/dvadmin/system/views/role.py
+@@ -9,12 +9,13 @@
+ from rest_framework import serializers
+ from rest_framework.decorators import action
+ from rest_framework.permissions import IsAuthenticated
++from django.db import transaction
+ 
+ from dvadmin.system.models import Role, Menu, MenuButton, Dept
+ from dvadmin.system.views.dept import DeptSerializer
+ from dvadmin.system.views.menu import MenuSerializer
+ from dvadmin.system.views.menu_button import MenuButtonSerializer
+-from dvadmin.utils.json_response import SuccessResponse, DetailResponse
++from dvadmin.utils.json_response import SuccessResponse, DetailResponse, ErrorResponse
+ from dvadmin.utils.serializers import CustomModelSerializer
+ from dvadmin.utils.validator import CustomUniqueValidator
+ from dvadmin.utils.viewset import CustomModelViewSet
+@@ -214,4 +215,42 @@ class RoleViewSet(CustomModelViewSet):
+         else:
+             dept_list = request.user.role.values_list('dept',flat=True)
+             queryset = Dept.objects.filter(id__in=dept_list).values('id','name','parent')
+-        return DetailResponse(data=queryset)
+\ No newline at end of file
++        return DetailResponse(data=queryset)
++
++    @action(methods=['POST'], detail=True, permission_classes=[IsAuthenticated])
++    def copy_role(self, request, pk=None):
++        """复制角色"""
++        source_role = self.get_object()
++        new_name = request.data.get('name', '')
++        new_key = request.data.get('key', '')
++        new_admin = request.data.get('admin', False)
++
++        if not new_name:
++            return ErrorResponse(msg="新角色名称不能为空")
++        if not new_key:
++            return ErrorResponse(msg="新角色权限字符不能为空")
++        if Role.objects.filter(name=new_name).exists():
++            return ErrorResponse(msg=f"角色名称'{new_name}'已存在，请修改后重试")
++        if Role.objects.filter(key=new_key).exists():
++            return ErrorResponse(msg=f"权限字符'{new_key}'已存在，请修改后重试")
++
++        with transaction.atomic():
++            new_role = Role.objects.create(
++                name=new_name,
++                key=new_key,
++                sort=request.data.get('sort', source_role.sort),
++                status=request.data.get('status', source_role.status),
++                admin=new_admin,
++                data_range=request.data.get('data_range', source_role.data_range),
++                remark=request.data.get('remark', source_role.remark),
++                creator=request.user,
++            )
++            # 复制关联菜单
++            new_role.menu.set(source_role.menu.all())
++            # 复制关联按钮权限
++            new_role.permission.set(source_role.permission.all())
++            # 复制数据权限-关联部门
++            new_role.dept.set(source_role.dept.all())
++
++        serializer = RoleSerializer(new_role)
++        return DetailResponse(data=serializer.data, msg="复制成功")
+\ No newline at end of file
+diff --git a/web/src/views/system/role/api.js b/web/src/views/system/role/api.js
+index 48a45664..ab9a8bd0 100644
+--- a/web/src/views/system/role/api.js
++++ b/web/src/views/system/role/api.js
+@@ -48,3 +48,11 @@ export function DelObj (id) {
+     data: { id }
+   })
+ }
++
++export function copyRole (id, data) {
++  return request({
++    url: urlPrefix + id + '/copy_role/',
++    method: 'post',
++    data
++  })
++}
+diff --git a/web/src/views/system/role/crud.js b/web/src/views/system/role/crud.js
+index d68c7605..df0a670e 100644
+--- a/web/src/views/system/role/crud.js
++++ b/web/src/views/system/role/crud.js
+@@ -19,7 +19,7 @@ export const crudOptions = (vm) => {
+           return !vm.hasPermissions('Retrieve')
+         }
+       },
+-      width: 230,
++      width: 300,
+       edit: {
+         thin: true,
+         text: '',
+@@ -45,6 +45,17 @@ export const crudOptions = (vm) => {
+         type: 'warning',
+         size: 'small',
+         emit: 'createPermission'
++      }, {
++        show (index, row) {
++          return true
++        },
++        disabled () {
++          return !vm.hasPermissions('Create')
++        },
++        text: '复制',
++        type: 'info',
++        size: 'small',
++        emit: 'copyRole'
+       }]
+ 
+     },
+diff --git a/web/src/views/system/role/index.vue b/web/src/views/system/role/index.vue
+index 72517e88..6f272d40 100644
+--- a/web/src/views/system/role/index.vue
++++ b/web/src/views/system/role/index.vue
+@@ -13,6 +13,8 @@
+       v-bind="_crudProps"
+       v-on="_crudListeners"
+       @createPermission="createPermission"
++      @copyRole="copyRole"
++      @dialog-closed="onDialogClosed"
+     >
+       <div slot="header">
+         <crud-search
+@@ -78,7 +80,8 @@ export default {
+   data () {
+     return {
+       rolePermissionShow: false,
+-      roleObj: undefined
++      roleObj: undefined,
++      copySourceRoleId: null
+     }
+   },
+   methods: {
+@@ -89,6 +92,12 @@ export default {
+       return api.GetList(query)
+     },
+     addRequest (row) {
++      if (this.copySourceRoleId) {
++        return api.copyRole(this.copySourceRoleId, row).then(res => {
++          this.copySourceRoleId = null
++          return res
++        })
++      }
+       return api.createObj(row)
+     },
+     updateRequest (row) {
+@@ -106,6 +115,26 @@ export default {
+       //   name: 'rolePermission',
+       //   params: { id: scope.row.id }
+       // })
++    },
++    // 复制角色
++    copyRole ({ row }) {
++      this.copySourceRoleId = row.id
++      this.getD2Crud().showDialog({
++        mode: 'add',
++        row: {
++          name: row.name + '_副本',
++          key: '',
++          sort: row.sort,
++          status: row.status,
++          admin: row.admin,
++          data_range: row.data_range,
++          remark: row.remark || ''
++        }
++      })
++    },
++    // 对话框关闭时清理复制状态
++    onDialogClosed () {
++      this.copySourceRoleId = null
+     }
+   }
+ }

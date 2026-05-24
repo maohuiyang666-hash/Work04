@@ -9,12 +9,13 @@
 from rest_framework import serializers
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
+from django.db import transaction
 
 from dvadmin.system.models import Role, Menu, MenuButton, Dept
 from dvadmin.system.views.dept import DeptSerializer
 from dvadmin.system.views.menu import MenuSerializer
 from dvadmin.system.views.menu_button import MenuButtonSerializer
-from dvadmin.utils.json_response import SuccessResponse, DetailResponse
+from dvadmin.utils.json_response import SuccessResponse, DetailResponse, ErrorResponse
 from dvadmin.utils.serializers import CustomModelSerializer
 from dvadmin.utils.validator import CustomUniqueValidator
 from dvadmin.utils.viewset import CustomModelViewSet
@@ -215,3 +216,41 @@ class RoleViewSet(CustomModelViewSet):
             dept_list = request.user.role.values_list('dept',flat=True)
             queryset = Dept.objects.filter(id__in=dept_list).values('id','name','parent')
         return DetailResponse(data=queryset)
+
+    @action(methods=['POST'], detail=True, permission_classes=[IsAuthenticated])
+    def copy_role(self, request, pk=None):
+        """复制角色"""
+        source_role = self.get_object()
+        new_name = request.data.get('name', '')
+        new_key = request.data.get('key', '')
+        new_admin = request.data.get('admin', False)
+
+        if not new_name:
+            return ErrorResponse(msg="新角色名称不能为空")
+        if not new_key:
+            return ErrorResponse(msg="新角色权限字符不能为空")
+        if Role.objects.filter(name=new_name).exists():
+            return ErrorResponse(msg=f"角色名称'{new_name}'已存在，请修改后重试")
+        if Role.objects.filter(key=new_key).exists():
+            return ErrorResponse(msg=f"权限字符'{new_key}'已存在，请修改后重试")
+
+        with transaction.atomic():
+            new_role = Role.objects.create(
+                name=new_name,
+                key=new_key,
+                sort=request.data.get('sort', source_role.sort),
+                status=request.data.get('status', source_role.status),
+                admin=new_admin,
+                data_range=request.data.get('data_range', source_role.data_range),
+                remark=request.data.get('remark', source_role.remark),
+                creator=request.user,
+            )
+            # 复制关联菜单
+            new_role.menu.set(source_role.menu.all())
+            # 复制关联按钮权限
+            new_role.permission.set(source_role.permission.all())
+            # 复制数据权限-关联部门
+            new_role.dept.set(source_role.dept.all())
+
+        serializer = RoleSerializer(new_role)
+        return DetailResponse(data=serializer.data, msg="复制成功")

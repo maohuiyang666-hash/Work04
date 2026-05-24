@@ -13,6 +13,8 @@
       v-bind="_crudProps"
       v-on="_crudListeners"
       @createPermission="createPermission"
+      @copyRole="copyRole"
+      @dialog-closed="onDialogClosed"
     >
       <div slot="header">
         <crud-search
@@ -78,7 +80,8 @@ export default {
   data () {
     return {
       rolePermissionShow: false,
-      roleObj: undefined
+      roleObj: undefined,
+      copySourceRoleId: null
     }
   },
   methods: {
@@ -89,6 +92,12 @@ export default {
       return api.GetList(query)
     },
     addRequest (row) {
+      if (this.copySourceRoleId) {
+        return api.copyRole(this.copySourceRoleId, row).then(res => {
+          this.copySourceRoleId = null
+          return res
+        })
+      }
       return api.createObj(row)
     },
     updateRequest (row) {
@@ -106,6 +115,26 @@ export default {
       //   name: 'rolePermission',
       //   params: { id: scope.row.id }
       // })
+    },
+    // 复制角色
+    copyRole ({ row }) {
+      this.copySourceRoleId = row.id
+      this.getD2Crud().showDialog({
+        mode: 'add',
+        row: {
+          name: row.name + '_副本',
+          key: '',
+          sort: row.sort,
+          status: row.status,
+          admin: row.admin,
+          data_range: row.data_range,
+          remark: row.remark || ''
+        }
+      })
+    },
+    // 对话框关闭时清理复制状态
+    onDialogClosed () {
+      this.copySourceRoleId = null
     }
   }
 }

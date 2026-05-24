@@ -48,3 +48,11 @@ export function DelObj (id) {
     data: { id }
   })
 }
+
+export function copyRole (id, data) {
+  return request({
+    url: urlPrefix + id + '/copy_role/',
+    method: 'post',
+    data
+  })
+}
