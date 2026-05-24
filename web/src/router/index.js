@@ -8,8 +8,11 @@ import store from '@/store/index'
 import util from '@/libs/util.js'
 // 路由数据
 import routes from './routes'
-import { getMenu, handleAsideMenu, handleRouter, checkRouter } from '@/menu'
+import { getMenu, handleAsideMenu, handleRouter, checkRouter, invalidMenus } from '@/menu'
 import { request } from '@/api/service'
+
+// 菜单错误页面组件
+const MenuErrorPage = () => import('@/views/system/error/menu-error.vue')
 
 // fix vue-router NavigationDuplicated
 const VueRouterPush = VueRouter.prototype.push
@@ -26,6 +29,17 @@ console.log(routes)
 // 导出路由 在 main.js 里使用
 const router = new VueRouter({
   routes
+})
+
+// 添加通用的菜单错误路由（用于处理直接访问异常路径）
+router.addRoute({
+  path: '/menu-error',
+  name: 'menuError',
+  component: MenuErrorPage,
+  meta: {
+    title: '菜单配置异常',
+    auth: false
+  }
 })
 
 /**
@@ -75,8 +89,24 @@ router.beforeEach(async (to, from, next) => {
           router.addRoute(r)
           router.options.routes.push(r)
         })
+
+        // 为异常菜单注册错误页面路由，让用户点击时能看到明确的错误提示
+        invalidMenus.forEach(menu => {
+          const errorRoute = {
+            path: menu.path,
+            name: `menu_error_${menu.path}`,
+            component: MenuErrorPage,
+            meta: {
+              title: `菜单配置异常 - ${menu.name}`,
+              auth: true,
+              menuError: menu
+            }
+          }
+          router.addRoute(errorRoute)
+          router.options.routes.push(errorRoute)
+        })
+
         console.log('router', router, routes, frameOut)
-        // routes.forEach(route => router.addRoute(route))
 
         const menu = handleAsideMenu(ret)
         const aside = handleAsideMenu(ret.filter(value => value.visible === true))
@@ -154,6 +184,30 @@ router.afterEach(to => {
   store.dispatch('d2admin/page/open', to)
   // 更改标题
   util.title(to.meta.title)
+})
+
+// 全局路由错误处理：捕获异步组件加载失败的情况
+router.onError((error) => {
+  const pattern = /Loading chunk (\S)+ failed/g
+  const isChunkLoadFailed = pattern.test(error.message)
+  if (isChunkLoadFailed) {
+    console.error('[路由错误] 页面组件加载失败:', error.message)
+    // 跳转到错误提示页面
+    const currentPath = router.currentRoute.path
+    router.replace({
+      path: '/menu-error',
+      query: { redirect: currentPath },
+      meta: {
+        menuError: {
+          name: '未知菜单',
+          component: '加载失败',
+          reason: '页面组件加载失败，可能是网络问题或组件已被删除'
+        }
+      }
+    })
+  } else {
+    console.error('[路由错误]', error)
+  }
 })
 
 export default router
