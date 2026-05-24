@@ -198,6 +198,12 @@
             "value": "Delete",
             "api": "/api/system/role/{id}/",
             "method": 3
+          },
+          {
+            "name": "复制",
+            "value": "Copy",
+            "api": "/api/system/role/{id}/copy_role/",
+            "method": 1
           }
         ]
       },

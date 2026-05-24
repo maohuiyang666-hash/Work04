@@ -1,0 +1,189 @@
+diff --git a/backend/dvadmin/system/fixtures/init_menu.json b/backend/dvadmin/system/fixtures/init_menu.json
+index ba5fadd6..12f1e68e 100644
+--- a/backend/dvadmin/system/fixtures/init_menu.json
++++ b/backend/dvadmin/system/fixtures/init_menu.json
+@@ -198,6 +198,12 @@
+             "value": "Delete",
+             "api": "/api/system/role/{id}/",
+             "method": 3
++          },
++          {
++            "name": "复制",
++            "value": "Copy",
++            "api": "/api/system/role/{id}/copy_role/",
++            "method": 1
+           }
+         ]
+       },
+diff --git a/backend/dvadmin/system/views/role.py b/backend/dvadmin/system/views/role.py
+index d11d36e4..0638132f 100644
+--- a/backend/dvadmin/system/views/role.py
++++ b/backend/dvadmin/system/views/role.py
+@@ -219,7 +219,7 @@ class RoleViewSet(CustomModelViewSet):
+ 
+     @action(methods=['POST'], detail=True, permission_classes=[IsAuthenticated])
+     def copy_role(self, request, pk=None):
+-        """复制角色"""
++        """复制角色（原子操作：角色基础信息+菜单+按钮权限+部门数据范围一起复制，任一失败则全部回滚）"""
+         source_role = self.get_object()
+         new_name = request.data.get('name', '')
+         new_key = request.data.get('key', '')
+@@ -244,6 +244,8 @@ class RoleViewSet(CustomModelViewSet):
+                 data_range=request.data.get('data_range', source_role.data_range),
+                 remark=request.data.get('remark', source_role.remark),
+                 creator=request.user,
++                modifier=request.user.id,
++                dept_belong_id=getattr(request.user, 'dept_id', None),
+             )
+             # 复制关联菜单
+             new_role.menu.set(source_role.menu.all())
+@@ -251,6 +253,7 @@ class RoleViewSet(CustomModelViewSet):
+             new_role.permission.set(source_role.permission.all())
+             # 复制数据权限-关联部门
+             new_role.dept.set(source_role.dept.all())
++            # 注意：不复制原角色关联的用户关系
+ 
+         serializer = RoleSerializer(new_role)
+         return DetailResponse(data=serializer.data, msg="复制成功")
+\ No newline at end of file
+diff --git a/web/src/views/system/role/crud.js b/web/src/views/system/role/crud.js
+index df0a670e..0454bc3e 100644
+--- a/web/src/views/system/role/crud.js
++++ b/web/src/views/system/role/crud.js
+@@ -50,7 +50,7 @@ export const crudOptions = (vm) => {
+           return true
+         },
+         disabled () {
+-          return !vm.hasPermissions('Create')
++          return !vm.hasPermissions('Copy')
+         },
+         text: '复制',
+         type: 'info',
+@@ -203,6 +203,43 @@ export const crudOptions = (vm) => {
+         }
+       },
+       component: { props: { color: 'auto' } }
++    },
++    {
++      title: '数据权限范围',
++      key: 'data_range',
++      sortable: true,
++      minWidth: 130,
++      type: 'select',
++      dict: {
++        data: [
++          { value: 0, label: '仅本人数据权限' },
++          { value: 1, label: '本部门及以下数据权限' },
++          { value: 2, label: '本部门数据权限' },
++          { value: 3, label: '全部数据权限' },
++          { value: 4, label: '自定义数据权限' }
++        ]
++      },
++      form: {
++        value: 0,
++        component: {
++          placeholder: '请选择数据权限范围'
++        }
++      }
++    },
++    {
++      title: '备注',
++      key: 'remark',
++      minWidth: 120,
++      type: 'textarea',
++      form: {
++        component: {
++          props: {
++            type: 'textarea',
++            clearable: true
++          },
++          placeholder: '请输入备注'
++        }
++      }
+     }
+     ].concat(vm.commonEndColumns())
+   }
+diff --git a/web/src/views/system/role/index.vue b/web/src/views/system/role/index.vue
+index 6f272d40..8620bec9 100644
+--- a/web/src/views/system/role/index.vue
++++ b/web/src/views/system/role/index.vue
+@@ -81,7 +81,8 @@ export default {
+     return {
+       rolePermissionShow: false,
+       roleObj: undefined,
+-      copySourceRoleId: null
++      copySourceRoleId: null,
++      isCopyMode: false
+     }
+   },
+   methods: {
+@@ -95,6 +96,15 @@ export default {
+       if (this.copySourceRoleId) {
+         return api.copyRole(this.copySourceRoleId, row).then(res => {
+           this.copySourceRoleId = null
++          this.isCopyMode = false
++          // 复制成功后自动打开权限页面查看结果
++          const newRole = res.data
++          if (newRole && newRole.id) {
++            this.$nextTick(() => {
++              this.roleObj = newRole
++              this.rolePermissionShow = true
++            })
++          }
+           return res
+         })
+       }
+@@ -111,14 +121,30 @@ export default {
+       console.log(scope)
+       this.roleObj = scope.row
+       this.rolePermissionShow = true
+-      // this.$router.push({
+-      //   name: 'rolePermission',
+-      //   params: { id: scope.row.id }
+-      // })
+     },
+     // 复制角色
+     copyRole ({ row }) {
+       this.copySourceRoleId = row.id
++      this.isCopyMode = true
++      // 如果原角色是管理员角色，提示用户确认
++      if (row.admin) {
++        this.$confirm('原角色为管理员角色，复制后新角色默认不继承管理员属性，如需设置请在表单中手动开启。', '复制角色提示', {
++          confirmButtonText: '知道了',
++          cancelButtonText: '取消复制',
++          type: 'warning'
++        }).then(() => {
++          this._showCopyDialog(row)
++        }).catch(() => {
++          this.copySourceRoleId = null
++          this.isCopyMode = false
++        })
++      } else {
++        this._showCopyDialog(row)
++      }
++    },
++    _showCopyDialog (row) {
++      // 设置复制模式的对话框标题
++      this.crud.formOptions.title = '复制角色'
+       this.getD2Crud().showDialog({
+         mode: 'add',
+         row: {
+@@ -126,7 +152,7 @@ export default {
+           key: '',
+           sort: row.sort,
+           status: row.status,
+-          admin: row.admin,
++          admin: false,
+           data_range: row.data_range,
+           remark: row.remark || ''
+         }
+@@ -135,6 +161,9 @@ export default {
+     // 对话框关闭时清理复制状态
+     onDialogClosed () {
+       this.copySourceRoleId = null
++      this.isCopyMode = false
++      // 恢复默认对话框标题
++      this.crud.formOptions.title = undefined
+     }
+   }
+ }

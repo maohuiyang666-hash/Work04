@@ -50,7 +50,7 @@ export const crudOptions = (vm) => {
           return true
         },
         disabled () {
-          return !vm.hasPermissions('Create')
+          return !vm.hasPermissions('Copy')
         },
         text: '复制',
         type: 'info',
@@ -203,6 +203,43 @@ export const crudOptions = (vm) => {
         }
       },
       component: { props: { color: 'auto' } }
+    },
+    {
+      title: '数据权限范围',
+      key: 'data_range',
+      sortable: true,
+      minWidth: 130,
+      type: 'select',
+      dict: {
+        data: [
+          { value: 0, label: '仅本人数据权限' },
+          { value: 1, label: '本部门及以下数据权限' },
+          { value: 2, label: '本部门数据权限' },
+          { value: 3, label: '全部数据权限' },
+          { value: 4, label: '自定义数据权限' }
+        ]
+      },
+      form: {
+        value: 0,
+        component: {
+          placeholder: '请选择数据权限范围'
+        }
+      }
+    },
+    {
+      title: '备注',
+      key: 'remark',
+      minWidth: 120,
+      type: 'textarea',
+      form: {
+        component: {
+          props: {
+            type: 'textarea',
+            clearable: true
+          },
+          placeholder: '请输入备注'
+        }
+      }
     }
     ].concat(vm.commonEndColumns())
   }

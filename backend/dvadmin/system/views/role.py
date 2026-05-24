@@ -219,7 +219,7 @@ class RoleViewSet(CustomModelViewSet):
 
     @action(methods=['POST'], detail=True, permission_classes=[IsAuthenticated])
     def copy_role(self, request, pk=None):
-        """复制角色"""
+        """复制角色（原子操作：角色基础信息+菜单+按钮权限+部门数据范围一起复制，任一失败则全部回滚）"""
         source_role = self.get_object()
         new_name = request.data.get('name', '')
         new_key = request.data.get('key', '')
@@ -244,6 +244,8 @@ class RoleViewSet(CustomModelViewSet):
                 data_range=request.data.get('data_range', source_role.data_range),
                 remark=request.data.get('remark', source_role.remark),
                 creator=request.user,
+                modifier=request.user.id,
+                dept_belong_id=getattr(request.user, 'dept_id', None),
             )
             # 复制关联菜单
             new_role.menu.set(source_role.menu.all())
@@ -251,6 +253,7 @@ class RoleViewSet(CustomModelViewSet):
             new_role.permission.set(source_role.permission.all())
             # 复制数据权限-关联部门
             new_role.dept.set(source_role.dept.all())
+            # 注意：不复制原角色关联的用户关系
 
         serializer = RoleSerializer(new_role)
         return DetailResponse(data=serializer.data, msg="复制成功")

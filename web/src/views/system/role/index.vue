@@ -81,7 +81,8 @@ export default {
     return {
       rolePermissionShow: false,
       roleObj: undefined,
-      copySourceRoleId: null
+      copySourceRoleId: null,
+      isCopyMode: false
     }
   },
   methods: {
@@ -95,6 +96,15 @@ export default {
       if (this.copySourceRoleId) {
         return api.copyRole(this.copySourceRoleId, row).then(res => {
           this.copySourceRoleId = null
+          this.isCopyMode = false
+          // 复制成功后自动打开权限页面查看结果
+          const newRole = res.data
+          if (newRole && newRole.id) {
+            this.$nextTick(() => {
+              this.roleObj = newRole
+              this.rolePermissionShow = true
+            })
+          }
           return res
         })
       }
@@ -111,14 +121,30 @@ export default {
       console.log(scope)
       this.roleObj = scope.row
       this.rolePermissionShow = true
-      // this.$router.push({
-      //   name: 'rolePermission',
-      //   params: { id: scope.row.id }
-      // })
     },
     // 复制角色
     copyRole ({ row }) {
       this.copySourceRoleId = row.id
+      this.isCopyMode = true
+      // 如果原角色是管理员角色，提示用户确认
+      if (row.admin) {
+        this.$confirm('原角色为管理员角色，复制后新角色默认不继承管理员属性，如需设置请在表单中手动开启。', '复制角色提示', {
+          confirmButtonText: '知道了',
+          cancelButtonText: '取消复制',
+          type: 'warning'
+        }).then(() => {
+          this._showCopyDialog(row)
+        }).catch(() => {
+          this.copySourceRoleId = null
+          this.isCopyMode = false
+        })
+      } else {
+        this._showCopyDialog(row)
+      }
+    },
+    _showCopyDialog (row) {
+      // 设置复制模式的对话框标题
+      this.crud.formOptions.title = '复制角色'
       this.getD2Crud().showDialog({
         mode: 'add',
         row: {
@@ -126,7 +152,7 @@ export default {
           key: '',
           sort: row.sort,
           status: row.status,
-          admin: row.admin,
+          admin: false,
           data_range: row.data_range,
           remark: row.remark || ''
         }
@@ -135,6 +161,9 @@ export default {
     // 对话框关闭时清理复制状态
     onDialogClosed () {
       this.copySourceRoleId = null
+      this.isCopyMode = false
+      // 恢复默认对话框标题
+      this.crud.formOptions.title = undefined
     }
   }
 }
