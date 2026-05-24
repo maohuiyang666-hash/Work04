@@ -1,13 +1,20 @@
-/**
- * @description 创建菜单
- * @param {Function} h createElement
- * @param {Object} menu 菜单项
- */
+function createMenuIcon (menu, titleSlot = false) {
+  const slot = titleSlot ? { slot: 'title' } : {}
+  if (menu.menuIssue) {
+    return <i {...slot} class="fa fa-exclamation-triangle"/>
+  }
+  if (menu.icon) {
+    return <i {...slot} class={ `fa fa-${menu.icon}` }/>
+  }
+  if (menu.iconSvg) {
+    return <d2-icon-svg {...slot} name={ menu.iconSvg }/>
+  }
+  return <i {...slot} class={ titleSlot ? 'fa fa-folder-o' : 'fa fa-file-o' }/>
+}
+
 export function elMenuItem (h, menu) {
-  let icon = null
-  if (menu.icon) icon = <i class={ `fa fa-${menu.icon}` }/>
-  else if (menu.iconSvg) icon = <d2-icon-svg name={ menu.iconSvg }/>
-  else icon = <i class="fa fa-file-o"/>
+  void h
+  const icon = createMenuIcon(menu)
   return <el-menu-item
     key={ menu.path }
     index={ menu.path }>
@@ -16,16 +23,9 @@ export function elMenuItem (h, menu) {
   </el-menu-item>
 }
 
-/**
- * @description 创建子菜单
- * @param {Function} h createElement
- * @param {Object} menu 菜单项
- */
 export function elSubmenu (h, menu) {
-  let icon = null
-  if (menu.icon) icon = <i slot="title" class={ `fa fa-${menu.icon}` }/>
-  else if (menu.iconSvg) icon = <d2-icon-svg slot="title" name={ menu.iconSvg }/>
-  else icon = <i slot="title" class="fa fa-folder-o"/>
+  void h
+  const icon = createMenuIcon(menu, true)
   return <el-submenu
     key={ menu.path }
     index={ menu.path }>
@@ -35,12 +35,8 @@ export function elSubmenu (h, menu) {
   </el-submenu>
 }
 
-/**
- * @description 在组件中调用此方法渲染菜单项目
- * @param {Function} h createElement
- * @param {Object} menu 菜单项
- */
 export function createMenu (h, menu) {
+  void h
   if (menu.children === undefined) return elMenuItem.call(this, h, menu)
   return elSubmenu.call(this, h, menu)
 }

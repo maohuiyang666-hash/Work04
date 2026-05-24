@@ -1,17 +1,16 @@
 import Vue from 'vue'
 import VueRouter from 'vue-router'
-// 进度条
 import NProgress from 'nprogress'
 import 'nprogress/nprogress.css'
+import { Message } from 'element-ui'
 
 import store from '@/store/index'
 import util from '@/libs/util.js'
-// 路由数据
 import routes from './routes'
-import { getMenu, handleAsideMenu, handleRouter, checkRouter } from '@/menu'
+import { getMenu, handleAsideMenu, parseMenuData, formatMenuIssueMessage } from '@/menu'
+import { frameOutRoutes } from '@/router/routes'
 import { request } from '@/api/service'
 
-// fix vue-router NavigationDuplicated
 const VueRouterPush = VueRouter.prototype.push
 VueRouter.prototype.push = function push (location) {
   return VueRouterPush.call(this, location).catch(err => err)
@@ -22,34 +21,129 @@ VueRouter.prototype.replace = function replace (location) {
 }
 
 Vue.use(VueRouter)
-console.log(routes)
-// 导出路由 在 main.js 里使用
 const router = new VueRouter({
   routes
 })
 
-/**
- * 路由拦截
- * 权限验证
- */
+function isMenuVisible (menu) {
+  return menu.visible === true || menu.visible === 1
+}
+
+function routeExists (targetRoutes, route) {
+  const routePath = route && route.path
+  const routeName = route && route.name
+  const check = (routes) => {
+    return routes.some(item => {
+      const sameName = routeName && item.name === routeName
+      const samePath = routePath && item.path === routePath
+      if (sameName || samePath) {
+        return true
+      }
+      if (item.children && item.children.length) {
+        return check(item.children)
+      }
+      return false
+    })
+  }
+  return check(targetRoutes)
+}
+
+function syncMenuSession (parsed) {
+  sessionStorage.setItem('menuData', JSON.stringify(parsed.asideMenus))
+  if (parsed.invalidMenus.length) {
+    sessionStorage.setItem('menuIssues', JSON.stringify(parsed.invalidMenus))
+  } else {
+    sessionStorage.removeItem('menuIssues')
+  }
+}
+
+function resetMenuSession () {
+  sessionStorage.removeItem('menuData')
+  sessionStorage.removeItem('menuIssues')
+}
+
+function showMenuIssue (issue) {
+  Message.error({
+    message: formatMenuIssueMessage(issue),
+    duration: 7000,
+    showClose: true
+  })
+}
+
+function showMenuIssueSummary (issues) {
+  if (!issues.length) {
+    return
+  }
+  Message.warning({
+    message: `检测到 ${issues.length} 个异常菜单，已从路由、搜索和已打开页签中隔离，可在侧边栏点击异常菜单查看详情。`,
+    duration: 7000,
+    showClose: true
+  })
+}
+
+function applyMenuState (parsed) {
+  store.commit('d2admin/menu/issuesSet', parsed.menuIssues)
+  store.commit('d2admin/page/init', parsed.routes)
+  parsed.routes.forEach(route => {
+    router.addRoute(route)
+  })
+  parsed.frameOut.slice(frameOutRoutes.length).forEach(route => {
+    if (!routeExists(router.options.routes, route)) {
+      router.addRoute(route)
+      router.options.routes.push(route)
+    }
+  })
+  const menu = handleAsideMenu(parsed.searchMenus)
+  const aside = handleAsideMenu(parsed.asideMenus.filter(isMenuVisible))
+  store.commit('d2admin/menu/asideSet', aside)
+  store.commit('d2admin/search/init', menu)
+}
+
+function applyMenuFallback () {
+  store.commit('d2admin/menu/issuesSet', {
+    list: [],
+    byKey: {},
+    byOriginalPath: {}
+  })
+  const menu = handleAsideMenu([])
+  store.commit('d2admin/menu/asideSet', menu)
+  store.commit('d2admin/search/init', menu)
+}
+
+async function loadDynamicMenus (to, next) {
+  await store.dispatch('d2admin/permission/load', routes)
+  await store.dispatch('d2admin/dept/load')
+  try {
+    const menuData = await getMenu()
+    const parsed = parseMenuData(menuData)
+    syncMenuSession(parsed)
+    applyMenuState(parsed)
+    await store.dispatch('d2admin/page/openedLoad')
+    showMenuIssueSummary(parsed.invalidMenus)
+    next({ path: to.fullPath, replace: true, params: to.params })
+  } catch (error) {
+    resetMenuSession()
+    applyMenuFallback()
+    await store.dispatch('d2admin/page/openedLoad')
+    Message.error({
+      message: '动态菜单加载失败，请刷新后重试或联系管理员检查菜单配置。',
+      duration: 6000,
+      showClose: true
+    })
+    next({ name: 'index', replace: true })
+  }
+}
+
 router.beforeEach(async (to, from, next) => {
-  // 白名单
   const whiteList = ['/login', '/auth-redirect', '/bind', '/register', '/clientRenew', '/oauth2']
-  // 确认已经加载多标签页数据 https://github.com/d2-projects/d2-admin/issues/201
   await store.dispatch('d2admin/page/isLoaded')
-  // 确认已经加载组件尺寸设置 https://github.com/d2-projects/d2-admin/issues/198
   await store.dispatch('d2admin/size/isLoaded')
-  // 进度条
   NProgress.start()
-  // 关闭搜索面板
   store.commit('d2admin/search/set', false)
-  // 验证当前路由所有的匹配中是否需要有登录验证的
-  // 这里暂时将cookie里是否存有token作为验证是否登录的条件
-  // 请根据自身业务需要修改
   const token = util.cookies.get('token')
   if (token && token !== 'undefined') {
     if (!store.state.d2admin.user.info.name) {
-      var res = await request({
+      const res = await request({
         url: '/api/system/user/user_info/',
         method: 'get',
         params: {}
@@ -59,81 +153,53 @@ router.beforeEach(async (to, from, next) => {
       store.dispatch('d2admin/settings/init')
     }
     if (!store.state.d2admin.menu || store.state.d2admin.menu.aside.length === 0) {
-      await store.dispatch('d2admin/permission/load', routes)
-      await store.dispatch('d2admin/dept/load')
-      // 动态添加路由
-      getMenu().then(ret => {
-        // 校验路由是否有效
-        ret = checkRouter(ret)
-        const { routes, frameOut } = handleRouter(ret)
-        // 处理路由 得到每一级的路由设置
-        store.commit('d2admin/page/init', routes)
-        routes.map((r) => {
-          router.addRoute(r)
-        })
-        frameOut.map((r) => {
-          router.addRoute(r)
-          router.options.routes.push(r)
-        })
-        console.log('router', router, routes, frameOut)
-        // routes.forEach(route => router.addRoute(route))
+      await loadDynamicMenus(to, next)
+      return
+    }
 
-        const menu = handleAsideMenu(ret)
-        const aside = handleAsideMenu(ret.filter(value => value.visible === true))
-        store.commit('d2admin/menu/asideSet', aside) // 设置侧边栏菜单
-        store.commit('d2admin/search/init', menu) // 设置搜索
-        next({ path: to.fullPath, replace: true, params: to.params })
-      })
-    } else {
-      const childrenPath = window.qiankunActiveRule || []
-      // 判断，是否是租户模式
-      if (to.path !== '/clientRenew' && store.state.d2admin.user.info.tenant_id) {
-        // 如果租户到期，跳转到续费页面
-        if (store.state.d2admin.user.info.tenant_expire) {
-          next({ path: '/clientRenew' })
-          // 取消当前导航
-          NProgress.done()
-          return
-        // 如果是普通租户，如果没有试用套餐，且是试用阶段
-        } else if (store.state.d2admin.user.info.tenant_id !== 100000 && !store.state.d2admin.user.info.package_manage && store.state.d2admin.user.info.tenant_experience) {
-          next({ path: '/clientRenew' })
-          // 取消当前导航
-          NProgress.done()
-          return
-        }
-      }
-      if (to.name) {
-        if (to.meta.openInNewWindow && ((from.query.newWindow && to.query.newWindow !== '1') || from.path === '/')) {
-          to.query.newWindow = '1'
-        }
+    const invalidMenuIssue = store.state.d2admin.menu.issuesByOriginalPath[to.path]
+    if (invalidMenuIssue) {
+      showMenuIssue(invalidMenuIssue)
+      NProgress.done()
+      next({ name: 'index', replace: true })
+      return
+    }
 
-        // 有 name 属性，说明是主应用的路由
-        if (to.meta.openInNewWindow && !to.query.newWindow && !from.query.newWindow && from.path !== '/') {
-          // 在新窗口中打开路由
-          const { href } = router.resolve({
-            path: to.path + '?newWindow=1'
-          })
-          window.open(href, '_blank')
-          // 取消当前导航
-          NProgress.done()
-          next(false)
-        } else {
-          // 取消当前导航
-          NProgress.done()
-          next()
-        }
-      } else if (childrenPath.some((item) => to.path.includes(item))) {
-        next()
-      } else {
-        next({ name: '404' })
+    const childrenPath = window.qiankunActiveRule || []
+    if (to.path !== '/clientRenew' && store.state.d2admin.user.info.tenant_id) {
+      if (store.state.d2admin.user.info.tenant_expire) {
+        next({ path: '/clientRenew' })
+        NProgress.done()
+        return
+      } else if (store.state.d2admin.user.info.tenant_id !== 100000 && !store.state.d2admin.user.info.package_manage && store.state.d2admin.user.info.tenant_experience) {
+        next({ path: '/clientRenew' })
+        NProgress.done()
+        return
       }
     }
+    if (to.name) {
+      if (to.meta.openInNewWindow && ((from.query.newWindow && to.query.newWindow !== '1') || from.path === '/')) {
+        to.query.newWindow = '1'
+      }
+
+      if (to.meta.openInNewWindow && !to.query.newWindow && !from.query.newWindow && from.path !== '/') {
+        const { href } = router.resolve({
+          path: to.path + '?newWindow=1'
+        })
+        window.open(href, '_blank')
+        NProgress.done()
+        next(false)
+      } else {
+        NProgress.done()
+        next()
+      }
+    } else if (childrenPath.some((item) => to.path.includes(item))) {
+      next()
+    } else {
+      next({ name: '404' })
+    }
   } else {
-    // 没有登录的时候跳转到登录界面
-    // 携带上登陆成功之后需要跳转的页面完整路径
-    // https://github.com/d2-projects/d2-admin/issues/138
     if (whiteList.indexOf(to.path) !== -1) {
-      // 在免登录白名单，直接进入
       next()
     } else {
       next({
@@ -148,11 +214,8 @@ router.beforeEach(async (to, from, next) => {
 })
 
 router.afterEach(to => {
-  // 进度条
   NProgress.done()
-  // 多页控制 打开新的页面
   store.dispatch('d2admin/page/open', to)
-  // 更改标题
   util.title(to.meta.title)
 })
 

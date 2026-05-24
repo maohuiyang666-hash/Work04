@@ -1,0 +1,1018 @@
+diff --git a/web/src/layout/header-aside/components/libs/util.menu.js b/web/src/layout/header-aside/components/libs/util.menu.js
+index c403492e..4bae446a 100644
+--- a/web/src/layout/header-aside/components/libs/util.menu.js
++++ b/web/src/layout/header-aside/components/libs/util.menu.js
+@@ -1,13 +1,20 @@
+-/**
+- * @description 创建菜单
+- * @param {Function} h createElement
+- * @param {Object} menu 菜单项
+- */
++function createMenuIcon (menu, titleSlot = false) {
++  const slot = titleSlot ? { slot: 'title' } : {}
++  if (menu.menuIssue) {
++    return <i {...slot} class="fa fa-exclamation-triangle"/>
++  }
++  if (menu.icon) {
++    return <i {...slot} class={ `fa fa-${menu.icon}` }/>
++  }
++  if (menu.iconSvg) {
++    return <d2-icon-svg {...slot} name={ menu.iconSvg }/>
++  }
++  return <i {...slot} class={ titleSlot ? 'fa fa-folder-o' : 'fa fa-file-o' }/>
++}
++
+ export function elMenuItem (h, menu) {
+-  let icon = null
+-  if (menu.icon) icon = <i class={ `fa fa-${menu.icon}` }/>
+-  else if (menu.iconSvg) icon = <d2-icon-svg name={ menu.iconSvg }/>
+-  else icon = <i class="fa fa-file-o"/>
++  void h
++  const icon = createMenuIcon(menu)
+   return <el-menu-item
+     key={ menu.path }
+     index={ menu.path }>
+@@ -16,16 +23,9 @@ export function elMenuItem (h, menu) {
+   </el-menu-item>
+ }
+ 
+-/**
+- * @description 创建子菜单
+- * @param {Function} h createElement
+- * @param {Object} menu 菜单项
+- */
+ export function elSubmenu (h, menu) {
+-  let icon = null
+-  if (menu.icon) icon = <i slot="title" class={ `fa fa-${menu.icon}` }/>
+-  else if (menu.iconSvg) icon = <d2-icon-svg slot="title" name={ menu.iconSvg }/>
+-  else icon = <i slot="title" class="fa fa-folder-o"/>
++  void h
++  const icon = createMenuIcon(menu, true)
+   return <el-submenu
+     key={ menu.path }
+     index={ menu.path }>
+@@ -35,12 +35,8 @@ export function elSubmenu (h, menu) {
+   </el-submenu>
+ }
+ 
+-/**
+- * @description 在组件中调用此方法渲染菜单项目
+- * @param {Function} h createElement
+- * @param {Object} menu 菜单项
+- */
+ export function createMenu (h, menu) {
++  void h
+   if (menu.children === undefined) return elMenuItem.call(this, h, menu)
+   return elSubmenu.call(this, h, menu)
+ }
+diff --git a/web/src/layout/header-aside/components/mixin/menu.js b/web/src/layout/header-aside/components/mixin/menu.js
+index 7160b58f..8273b4bb 100644
+--- a/web/src/layout/header-aside/components/mixin/menu.js
++++ b/web/src/layout/header-aside/components/mixin/menu.js
+@@ -1,9 +1,17 @@
+ import util from '@/libs/util.js'
++import { formatMenuIssueMessage } from '@/menu'
+ 
+ export default {
+   methods: {
+-    handleMenuSelect (index, indexPath) {
+-      if (/^d2-menu-empty-\d+$/.test(index) || index === undefined) {
++    handleMenuSelect (index) {
++      const issue = this.$store.state.d2admin.menu.issuesByKey[index]
++      if (issue) {
++        this.$message.error({
++          message: formatMenuIssueMessage(issue),
++          duration: 7000,
++          showClose: true
++        })
++      } else if (/^d2-menu-empty-\d+$/.test(index) || index === undefined) {
+         this.$message.warning('临时菜单')
+       } else if (/^https:\/\/|http:\/\//.test(index)) {
+         util.open(index)
+diff --git a/web/src/menu/index.js b/web/src/menu/index.js
+index 422d23f6..34af2be9 100644
+--- a/web/src/menu/index.js
++++ b/web/src/menu/index.js
+@@ -4,11 +4,9 @@ import XEUtils from 'xe-utils'
+ import { frameInRoutes, frameOutRoutes } from '@/router/routes'
+ const _import = require('@/libs/util.import.' + process.env.NODE_ENV)
+ const pluginImport = require('@/libs/util.import.plugin')
+-/**
+- * @description 给菜单数据补充上 path 字段
+- * @description https://github.com/d2-projects/d2-admin/issues/209
+- * @param {Array} menu 原始的菜单数据
+- */
++const viewModules = require.context('@/views', true, /\.vue$/)
++const INVALID_MENU_PATH_PREFIX = 'd2-menu-error-'
++
+ function supplementPath (menu) {
+   return menu.map(e => ({
+     ...e,
+@@ -19,79 +17,259 @@ function supplementPath (menu) {
+   }))
+ }
+ 
++function normalizeText (value) {
++  return typeof value === 'string' ? value.trim() : ''
++}
++
++function toBooleanFlag (value) {
++  return value === true || value === 1 || value === '1'
++}
++
++function normalizeMenuItem (item) {
++  const title = item.title || item.name || '未命名菜单'
++  const normalized = {
++    ...item,
++    title,
++    is_catalog: toBooleanFlag(item.is_catalog),
++    is_link: toBooleanFlag(item.is_link),
++    frame_out: toBooleanFlag(item.frame_out),
++    visible: toBooleanFlag(item.visible),
++    cache: toBooleanFlag(item.cache)
++  }
++  if (normalized.path === '' && !normalized.is_link) {
++    delete normalized.path
++  }
++  return normalized
++}
++
++function cloneRoutes (routes) {
++  return routes.map(route => ({
++    ...route,
++    children: route.children ? [...route.children] : undefined
++  }))
++}
++
++function collectRouteIdentifiers (routes, nameSet, pathSet) {
++  routes.forEach(route => {
++    if (route.name) {
++      nameSet.add(route.name)
++    }
++    if (route.path) {
++      pathSet.add(route.path)
++    }
++    if (route.children && route.children.length) {
++      collectRouteIdentifiers(route.children, nameSet, pathSet)
++    }
++  })
++}
++
++function createMenuIssue (item, reason, detail = '') {
++  return {
++    key: uniqueId(INVALID_MENU_PATH_PREFIX),
++    title: item.title || item.name || '未命名菜单',
++    reason,
++    detail,
++    originalPath: normalizeText(item.path),
++    component: normalizeText(item.component),
++    componentName: normalizeText(item.component_name),
++    id: item.id,
++    visible: item.visible
++  }
++}
++
++function getMenuIssueTitle (title) {
++  return `${title}（配置异常）`
++}
++
++function buildIssueMenuItem (item, issue) {
++  return {
++    ...item,
++    path: issue.key,
++    title: getMenuIssueTitle(issue.title),
++    menuIssue: true,
++    menuIssueKey: issue.key
++  }
++}
++
++function resolveLocalComponent (component) {
++  const normalizedComponent = normalizeText(component).replace(/^\//, '')
++  const modulePath = `./${normalizedComponent}.vue`
++  if (!viewModules.keys().includes(modulePath)) {
++    throw new Error(`页面组件不存在：${normalizedComponent}`)
++  }
++  const module = viewModules(modulePath)
++  const viewComponent = module && module.default ? module.default : module
++  return {
++    routeComponent: _import(normalizedComponent),
++    viewName: viewComponent && viewComponent.name ? normalizeText(viewComponent.name) : ''
++  }
++}
++
++function resolveMenuComponent (component) {
++  const normalizedComponent = normalizeText(component)
++  if (normalizedComponent.startsWith('plugins/')) {
++    const routeComponent = pluginImport(normalizedComponent.replace('plugins/', ''))
++    return {
++      routeComponent,
++      viewName: routeComponent && routeComponent.name ? normalizeText(routeComponent.name) : ''
++    }
++  }
++  return resolveLocalComponent(normalizedComponent)
++}
++
++function validateRouteMenuItem (item, routeNameSet, routePathSet) {
++  const path = normalizeText(item.path)
++  const component = normalizeText(item.component)
++  const componentName = normalizeText(item.component_name)
++
++  if (!path) {
++    return { issue: createMenuIssue(item, '缺少路由地址') }
++  }
++  if (!component) {
++    return { issue: createMenuIssue(item, '缺少组件地址') }
++  }
++  if (!componentName) {
++    return { issue: createMenuIssue(item, '缺少组件名称') }
++  }
++  if (routePathSet.has(path)) {
++    return { issue: createMenuIssue(item, `路由地址重复：${path}`) }
++  }
++  if (routeNameSet.has(componentName)) {
++    return { issue: createMenuIssue(item, `组件名称重复：${componentName}`) }
++  }
++
++  try {
++    const { routeComponent, viewName } = resolveMenuComponent(component)
++    if (viewName && componentName !== viewName) {
++      return {
++        issue: createMenuIssue(item, `组件名称与页面 name 不一致，应为：${viewName}`)
++      }
++    }
++    return {
++      path,
++      componentName,
++      routeComponent
++    }
++  } catch (error) {
++    return {
++      issue: createMenuIssue(item, `组件地址解析失败：${component}`, error.message)
++    }
++  }
++}
++
+ export const menuHeader = supplementPath([])
+ 
+ export const menuAside = supplementPath([])
+ 
+-// 请求菜单数据,用于解析路由和侧边栏菜单
+ export const getMenu = function () {
+   return request({
+     url: '/api/system/menu/web_router/',
+     method: 'get',
+     params: {}
+   }).then((res) => {
+-    // 设置动态路由
+-    const menuData = res.data.data
+-    sessionStorage.setItem('menuData', JSON.stringify(menuData))
+-    return menuData
++    return res.data.data || []
+   })
+ }
+ 
+-/**
+- * 校验路由是否有效
+- */
+-export const checkRouter = function (menuData) {
+-  const result = []
+-  for (const item of menuData) {
+-    try {
+-      if (item.path !== '' && item.component) {
+-        (item.component && item.component.substr(0, 8) === 'plugins/') ? pluginImport(item.component.replace('plugins/', '')) : _import(item.component)
+-      }
+-      result.push(item)
+-    } catch (err) {
+-      console.log(`导入菜单错误，会导致页面无法访问，请检查文件是否存在：${item.component}`)
+-    }
+-  }
+-  return result
++export const isMenuIssuePath = function (path) {
++  return typeof path === 'string' && path.indexOf(INVALID_MENU_PATH_PREFIX) === 0
+ }
+-/**
+- * 将获取到的后端菜单数据,解析为前端路由
+- */
+-export const handleRouter = function (menuData) {
+-  const result = []
+-  for (const item of menuData) {
+-    if (item.path !== '' && item.component) {
+-      const obj = {
+-        path: item.path,
+-        name: item.component_name,
+-        component: (item.component && item.component.substr(0, 8) === 'plugins/') ? pluginImport(item.component.replace('plugins/', '')) : _import(item.component),
++
++export const formatMenuIssueMessage = function (issue) {
++  return [
++    `菜单“${issue.title}”配置异常`,
++    issue.reason,
++    issue.originalPath ? `路由：${issue.originalPath}` : '',
++    issue.component ? `组件：${issue.component}` : '',
++    issue.componentName ? `组件名称：${issue.componentName}` : '',
++    issue.detail ? `详情：${issue.detail}` : ''
++  ].filter(Boolean).join('；')
++}
++
++export const parseMenuData = function (menuData) {
++  const routes = cloneRoutes(frameInRoutes)
++  const frameOut = [...frameOutRoutes]
++  const routeItems = []
++  const validMenus = []
++  const asideMenus = []
++  const invalidMenus = []
++  const issuesByKey = {}
++  const issuesByOriginalPath = {}
++  const routeNameSet = new Set()
++  const routePathSet = new Set()
++
++  collectRouteIdentifiers(routes, routeNameSet, routePathSet)
++  collectRouteIdentifiers(frameOut, routeNameSet, routePathSet)
++  routeNameSet.add('404')
++  routePathSet.add('/404')
++
++  menuData.forEach(rawItem => {
++    const item = normalizeMenuItem(rawItem)
++    const shouldBuildRoute = !item.is_catalog && !item.is_link
++
++    if (shouldBuildRoute) {
++      const validated = validateRouteMenuItem(item, routeNameSet, routePathSet)
++      if (validated.issue) {
++        invalidMenus.push(validated.issue)
++        issuesByKey[validated.issue.key] = validated.issue
++        if (validated.issue.originalPath) {
++          issuesByOriginalPath[validated.issue.originalPath] = validated.issue
++        }
++        asideMenus.push(buildIssueMenuItem(item, validated.issue))
++        return
++      }
++
++      routeNameSet.add(validated.componentName)
++      routePathSet.add(validated.path)
++      const route = {
++        path: validated.path,
++        name: validated.componentName,
++        component: validated.routeComponent,
+         meta: {
+-          title: item.name,
++          title: item.title,
+           auth: true,
+           cache: item.cache,
+           openInNewWindow: item.frame_out
+         }
+       }
+       if (item.frame_out) {
+-        frameOutRoutes.push(obj)
++        frameOut.push(route)
+       } else {
+-        result.push(obj)
+-      }
+-    } else {
+-      if (item.is_link === 0) {
+-        delete item.path
++        routeItems.push(route)
+       }
+     }
++
++    validMenus.push(item)
++    asideMenus.push(item)
++  })
++
++  routes[0].children = [...routeItems]
++
++  return {
++    routes,
++    frameOut,
++    validMenus,
++    asideMenus,
++    searchMenus: validMenus,
++    invalidMenus,
++    menuIssues: {
++      list: invalidMenus,
++      byKey: issuesByKey,
++      byOriginalPath: issuesByOriginalPath
++    }
+   }
+-  frameInRoutes[0].children = [...result]
+-  return { routes: frameInRoutes, frameOut: frameOutRoutes }
+ }
+ 
+-/**
+- * 将前端的侧边菜单进行处理
+- */
++export const checkRouter = function (menuData) {
++  return parseMenuData(menuData).validMenus
++}
++
++export const handleRouter = function (menuData) {
++  const { routes, frameOut } = parseMenuData(menuData)
++  return { routes, frameOut }
++}
++
+ export const handleAsideMenu = function (menuData) {
+-  // 将列表数据转换为树形数据
+   const data = XEUtils.toArrayTree(menuData, {
+     parentKey: 'parent',
+     strict: true
+diff --git a/web/src/router/index.js b/web/src/router/index.js
+index 83fdc2f1..ae2dbf04 100644
+--- a/web/src/router/index.js
++++ b/web/src/router/index.js
+@@ -1,17 +1,16 @@
+ import Vue from 'vue'
+ import VueRouter from 'vue-router'
+-// 进度条
+ import NProgress from 'nprogress'
+ import 'nprogress/nprogress.css'
++import { Message } from 'element-ui'
+ 
+ import store from '@/store/index'
+ import util from '@/libs/util.js'
+-// 路由数据
+ import routes from './routes'
+-import { getMenu, handleAsideMenu, handleRouter, checkRouter } from '@/menu'
++import { getMenu, handleAsideMenu, parseMenuData, formatMenuIssueMessage } from '@/menu'
++import { frameOutRoutes } from '@/router/routes'
+ import { request } from '@/api/service'
+ 
+-// fix vue-router NavigationDuplicated
+ const VueRouterPush = VueRouter.prototype.push
+ VueRouter.prototype.push = function push (location) {
+   return VueRouterPush.call(this, location).catch(err => err)
+@@ -22,34 +21,129 @@ VueRouter.prototype.replace = function replace (location) {
+ }
+ 
+ Vue.use(VueRouter)
+-console.log(routes)
+-// 导出路由 在 main.js 里使用
+ const router = new VueRouter({
+   routes
+ })
+ 
+-/**
+- * 路由拦截
+- * 权限验证
+- */
++function isMenuVisible (menu) {
++  return menu.visible === true || menu.visible === 1
++}
++
++function routeExists (targetRoutes, route) {
++  const routePath = route && route.path
++  const routeName = route && route.name
++  const check = (routes) => {
++    return routes.some(item => {
++      const sameName = routeName && item.name === routeName
++      const samePath = routePath && item.path === routePath
++      if (sameName || samePath) {
++        return true
++      }
++      if (item.children && item.children.length) {
++        return check(item.children)
++      }
++      return false
++    })
++  }
++  return check(targetRoutes)
++}
++
++function syncMenuSession (parsed) {
++  sessionStorage.setItem('menuData', JSON.stringify(parsed.asideMenus))
++  if (parsed.invalidMenus.length) {
++    sessionStorage.setItem('menuIssues', JSON.stringify(parsed.invalidMenus))
++  } else {
++    sessionStorage.removeItem('menuIssues')
++  }
++}
++
++function resetMenuSession () {
++  sessionStorage.removeItem('menuData')
++  sessionStorage.removeItem('menuIssues')
++}
++
++function showMenuIssue (issue) {
++  Message.error({
++    message: formatMenuIssueMessage(issue),
++    duration: 7000,
++    showClose: true
++  })
++}
++
++function showMenuIssueSummary (issues) {
++  if (!issues.length) {
++    return
++  }
++  Message.warning({
++    message: `检测到 ${issues.length} 个异常菜单，已从路由、搜索和已打开页签中隔离，可在侧边栏点击异常菜单查看详情。`,
++    duration: 7000,
++    showClose: true
++  })
++}
++
++function applyMenuState (parsed) {
++  store.commit('d2admin/menu/issuesSet', parsed.menuIssues)
++  store.commit('d2admin/page/init', parsed.routes)
++  parsed.routes.forEach(route => {
++    router.addRoute(route)
++  })
++  parsed.frameOut.slice(frameOutRoutes.length).forEach(route => {
++    if (!routeExists(router.options.routes, route)) {
++      router.addRoute(route)
++      router.options.routes.push(route)
++    }
++  })
++  const menu = handleAsideMenu(parsed.searchMenus)
++  const aside = handleAsideMenu(parsed.asideMenus.filter(isMenuVisible))
++  store.commit('d2admin/menu/asideSet', aside)
++  store.commit('d2admin/search/init', menu)
++}
++
++function applyMenuFallback () {
++  store.commit('d2admin/menu/issuesSet', {
++    list: [],
++    byKey: {},
++    byOriginalPath: {}
++  })
++  const menu = handleAsideMenu([])
++  store.commit('d2admin/menu/asideSet', menu)
++  store.commit('d2admin/search/init', menu)
++}
++
++async function loadDynamicMenus (to, next) {
++  await store.dispatch('d2admin/permission/load', routes)
++  await store.dispatch('d2admin/dept/load')
++  try {
++    const menuData = await getMenu()
++    const parsed = parseMenuData(menuData)
++    syncMenuSession(parsed)
++    applyMenuState(parsed)
++    await store.dispatch('d2admin/page/openedLoad')
++    showMenuIssueSummary(parsed.invalidMenus)
++    next({ path: to.fullPath, replace: true, params: to.params })
++  } catch (error) {
++    resetMenuSession()
++    applyMenuFallback()
++    await store.dispatch('d2admin/page/openedLoad')
++    Message.error({
++      message: '动态菜单加载失败，请刷新后重试或联系管理员检查菜单配置。',
++      duration: 6000,
++      showClose: true
++    })
++    next({ name: 'index', replace: true })
++  }
++}
++
+ router.beforeEach(async (to, from, next) => {
+-  // 白名单
+   const whiteList = ['/login', '/auth-redirect', '/bind', '/register', '/clientRenew', '/oauth2']
+-  // 确认已经加载多标签页数据 https://github.com/d2-projects/d2-admin/issues/201
+   await store.dispatch('d2admin/page/isLoaded')
+-  // 确认已经加载组件尺寸设置 https://github.com/d2-projects/d2-admin/issues/198
+   await store.dispatch('d2admin/size/isLoaded')
+-  // 进度条
+   NProgress.start()
+-  // 关闭搜索面板
+   store.commit('d2admin/search/set', false)
+-  // 验证当前路由所有的匹配中是否需要有登录验证的
+-  // 这里暂时将cookie里是否存有token作为验证是否登录的条件
+-  // 请根据自身业务需要修改
+   const token = util.cookies.get('token')
+   if (token && token !== 'undefined') {
+     if (!store.state.d2admin.user.info.name) {
+-      var res = await request({
++      const res = await request({
+         url: '/api/system/user/user_info/',
+         method: 'get',
+         params: {}
+@@ -59,81 +153,53 @@ router.beforeEach(async (to, from, next) => {
+       store.dispatch('d2admin/settings/init')
+     }
+     if (!store.state.d2admin.menu || store.state.d2admin.menu.aside.length === 0) {
+-      await store.dispatch('d2admin/permission/load', routes)
+-      await store.dispatch('d2admin/dept/load')
+-      // 动态添加路由
+-      getMenu().then(ret => {
+-        // 校验路由是否有效
+-        ret = checkRouter(ret)
+-        const { routes, frameOut } = handleRouter(ret)
+-        // 处理路由 得到每一级的路由设置
+-        store.commit('d2admin/page/init', routes)
+-        routes.map((r) => {
+-          router.addRoute(r)
+-        })
+-        frameOut.map((r) => {
+-          router.addRoute(r)
+-          router.options.routes.push(r)
+-        })
+-        console.log('router', router, routes, frameOut)
+-        // routes.forEach(route => router.addRoute(route))
+-
+-        const menu = handleAsideMenu(ret)
+-        const aside = handleAsideMenu(ret.filter(value => value.visible === true))
+-        store.commit('d2admin/menu/asideSet', aside) // 设置侧边栏菜单
+-        store.commit('d2admin/search/init', menu) // 设置搜索
+-        next({ path: to.fullPath, replace: true, params: to.params })
+-      })
+-    } else {
+-      const childrenPath = window.qiankunActiveRule || []
+-      // 判断，是否是租户模式
+-      if (to.path !== '/clientRenew' && store.state.d2admin.user.info.tenant_id) {
+-        // 如果租户到期，跳转到续费页面
+-        if (store.state.d2admin.user.info.tenant_expire) {
+-          next({ path: '/clientRenew' })
+-          // 取消当前导航
+-          NProgress.done()
+-          return
+-        // 如果是普通租户，如果没有试用套餐，且是试用阶段
+-        } else if (store.state.d2admin.user.info.tenant_id !== 100000 && !store.state.d2admin.user.info.package_manage && store.state.d2admin.user.info.tenant_experience) {
+-          next({ path: '/clientRenew' })
+-          // 取消当前导航
+-          NProgress.done()
+-          return
+-        }
++      await loadDynamicMenus(to, next)
++      return
++    }
++
++    const invalidMenuIssue = store.state.d2admin.menu.issuesByOriginalPath[to.path]
++    if (invalidMenuIssue) {
++      showMenuIssue(invalidMenuIssue)
++      NProgress.done()
++      next({ name: 'index', replace: true })
++      return
++    }
++
++    const childrenPath = window.qiankunActiveRule || []
++    if (to.path !== '/clientRenew' && store.state.d2admin.user.info.tenant_id) {
++      if (store.state.d2admin.user.info.tenant_expire) {
++        next({ path: '/clientRenew' })
++        NProgress.done()
++        return
++      } else if (store.state.d2admin.user.info.tenant_id !== 100000 && !store.state.d2admin.user.info.package_manage && store.state.d2admin.user.info.tenant_experience) {
++        next({ path: '/clientRenew' })
++        NProgress.done()
++        return
++      }
++    }
++    if (to.name) {
++      if (to.meta.openInNewWindow && ((from.query.newWindow && to.query.newWindow !== '1') || from.path === '/')) {
++        to.query.newWindow = '1'
+       }
+-      if (to.name) {
+-        if (to.meta.openInNewWindow && ((from.query.newWindow && to.query.newWindow !== '1') || from.path === '/')) {
+-          to.query.newWindow = '1'
+-        }
+ 
+-        // 有 name 属性，说明是主应用的路由
+-        if (to.meta.openInNewWindow && !to.query.newWindow && !from.query.newWindow && from.path !== '/') {
+-          // 在新窗口中打开路由
+-          const { href } = router.resolve({
+-            path: to.path + '?newWindow=1'
+-          })
+-          window.open(href, '_blank')
+-          // 取消当前导航
+-          NProgress.done()
+-          next(false)
+-        } else {
+-          // 取消当前导航
+-          NProgress.done()
+-          next()
+-        }
+-      } else if (childrenPath.some((item) => to.path.includes(item))) {
+-        next()
++      if (to.meta.openInNewWindow && !to.query.newWindow && !from.query.newWindow && from.path !== '/') {
++        const { href } = router.resolve({
++          path: to.path + '?newWindow=1'
++        })
++        window.open(href, '_blank')
++        NProgress.done()
++        next(false)
+       } else {
+-        next({ name: '404' })
++        NProgress.done()
++        next()
+       }
++    } else if (childrenPath.some((item) => to.path.includes(item))) {
++      next()
++    } else {
++      next({ name: '404' })
+     }
+   } else {
+-    // 没有登录的时候跳转到登录界面
+-    // 携带上登陆成功之后需要跳转的页面完整路径
+-    // https://github.com/d2-projects/d2-admin/issues/138
+     if (whiteList.indexOf(to.path) !== -1) {
+-      // 在免登录白名单，直接进入
+       next()
+     } else {
+       next({
+@@ -148,11 +214,8 @@ router.beforeEach(async (to, from, next) => {
+ })
+ 
+ router.afterEach(to => {
+-  // 进度条
+   NProgress.done()
+-  // 多页控制 打开新的页面
+   store.dispatch('d2admin/page/open', to)
+-  // 更改标题
+   util.title(to.meta.title)
+ })
+ 
+diff --git a/web/src/store/modules/d2admin/modules/account.js b/web/src/store/modules/d2admin/modules/account.js
+index a878ebf1..080e0131 100644
+--- a/web/src/store/modules/d2admin/modules/account.js
++++ b/web/src/store/modules/d2admin/modules/account.js
+@@ -16,13 +16,6 @@ import { request } from '@/api/service'
+ export default {
+   namespaced: true,
+   actions: {
+-    /**
+-     * @description 登录
+-     * @param {Object} context
+-     * @param {Object} payload username {String} 用户账号
+-     * @param {Object} payload password {String} 密码
+-     * @param {Object} payload route {Object} 登录成功后定向的路由对象 任何 vue-router 支持的格式
+-     */
+     async login ({ dispatch }, {
+       username = '',
+       password = '',
+@@ -35,63 +28,41 @@ export default {
+         captcha,
+         captchaKey
+       })
+-      // 设置 cookie 一定要存 uuid 和 token 两个 cookie
+-      // 整个系统依赖这两个数据进行校验和存储
+-      // uuid 是用户身份唯一标识 用户注册的时候确定 并且不可改变 不可重复
+-      // token 代表用户当前登录状态 建议在网络请求中携带 token
+-      // 如有必要 token 需要定时更新，默认保存一天
+       res = res.data
+       util.cookies.set('uuid', res.userId)
+       util.cookies.set('token', res.access)
+       util.cookies.set('refresh', res.refresh)
+-      // 设置 vuex 用户信息
+-      // await dispatch('d2admin/user/set', {
+-      //   name: res.name,
+-      //   user_id: res.userId,
+-      //   avatar: res.avatar,
+-      //   role_info: res.role_info,
+-      //   dept_info: res.dept_info
+-      // }, { root: true })
+-      var userInfoRes = await request({
++      const userInfoRes = await request({
+         url: '/api/system/user/user_info/',
+         method: 'get',
+         params: {}
+       })
+       await store.dispatch('d2admin/user/set', userInfoRes.data, { root: true })
+-      // 用户登录后从持久化数据加载一系列的设置
+       await dispatch('load')
+     },
+-    /**
+-     * @description 注销用户并返回登录页面
+-     * @param {Object} context
+-     * @param {Object} payload confirm {Boolean} 是否需要确认
+-     */
+     logout ({ commit, dispatch }, { confirm = false, refresh = true } = {}) {
+-      /**
+-       * @description 注销
+-       */
+       async function logout () {
+         await SYS_USER_LOGOUT({ refresh: util.cookies.get('refresh') }).then(() => {
+-          // 删除cookie
+           util.cookies.remove('token')
+           util.cookies.remove('uuid')
+           util.cookies.remove('refresh')
+         })
+-        // 清空 vuex 用户信息
+         await dispatch('d2admin/user/set', {}, { root: true })
+-        store.commit('d2admin/menu/asideSet', []) // 设置侧边栏菜单
+-        store.commit('d2admin/search/init', []) // 设置搜索
++        store.commit('d2admin/menu/asideSet', [])
++        store.commit('d2admin/menu/issuesSet', {
++          list: [],
++          byKey: {},
++          byOriginalPath: {}
++        })
++        store.commit('d2admin/search/init', [])
+         sessionStorage.removeItem('menuData')
+-
++        sessionStorage.removeItem('menuIssues')
+         store.dispatch('d2admin/db/databaseClear')
+-
+-        // 跳转路由
+         router.push({ name: 'login' })
+         if (refresh) {
+           router.go(0)
+         }
+       }
+-      // 判断是否需要确认
+       if (confirm) {
+         commit('d2admin/gray/set', true, { root: true })
+         MessageBox.confirm('确定要注销当前用户吗', '注销用户', { type: 'warning' })
+@@ -107,24 +78,13 @@ export default {
+         logout()
+       }
+     },
+-    /**
+-         * @description 用户登录后从持久化数据加载一系列的设置
+-         * @param {Object} context
+-         */
+     async load ({ dispatch }) {
+-      // 加载用户名
+       await dispatch('d2admin/user/load', null, { root: true })
+-      // 加载主题
+       await dispatch('d2admin/theme/load', null, { root: true })
+-      // 加载页面过渡效果设置
+       await dispatch('d2admin/transition/load', null, { root: true })
+-      // 持久化数据加载上次退出时的多页列表
+       await dispatch('d2admin/page/openedLoad', null, { root: true })
+-      // 持久化数据加载侧边栏配置
+       await dispatch('d2admin/menu/asideLoad', null, { root: true })
+-      // 持久化数据加载全局尺寸
+       await dispatch('d2admin/size/load', null, { root: true })
+-      // 持久化数据加载颜色设置
+       await dispatch('d2admin/color/load', null, { root: true })
+     }
+   }
+diff --git a/web/src/store/modules/d2admin/modules/menu.js b/web/src/store/modules/d2admin/modules/menu.js
+index 327a3d16..680fb018 100644
+--- a/web/src/store/modules/d2admin/modules/menu.js
++++ b/web/src/store/modules/d2admin/modules/menu.js
+@@ -1,28 +1,19 @@
+-// 设置文件
+ import setting from '@/setting.js'
+ 
+ export default {
+   namespaced: true,
+   state: {
+-    // 顶栏菜单
+     header: [],
+-    // 侧栏菜单
+     aside: [],
+-    // 侧边栏收缩
++    issues: [],
++    issuesByKey: {},
++    issuesByOriginalPath: {},
+     asideCollapse: setting.menu.asideCollapse,
+-    // 侧边栏折叠动画
+     asideTransition: setting.menu.asideTransition
+   },
+   actions: {
+-    /**
+-     * 设置侧边栏展开或者收缩
+-     * @param {Object} context
+-     * @param {Boolean} collapse is collapse
+-     */
+     async asideCollapseSet ({ state, dispatch }, collapse) {
+-      // store 赋值
+       state.asideCollapse = collapse
+-      // 持久化
+       await dispatch('d2admin/db/set', {
+         dbName: 'sys',
+         path: 'menu.asideCollapse',
+@@ -30,14 +21,8 @@ export default {
+         user: true
+       }, { root: true })
+     },
+-    /**
+-     * 切换侧边栏展开和收缩
+-     * @param {Object} context
+-     */
+     async asideCollapseToggle ({ state, dispatch }) {
+-      // store 赋值
+       state.asideCollapse = !state.asideCollapse
+-      // 持久化
+       await dispatch('d2admin/db/set', {
+         dbName: 'sys',
+         path: 'menu.asideCollapse',
+@@ -45,15 +30,8 @@ export default {
+         user: true
+       }, { root: true })
+     },
+-    /**
+-     * 设置侧边栏折叠动画
+-     * @param {Object} context
+-     * @param {Boolean} transition is transition
+-     */
+     async asideTransitionSet ({ state, dispatch }, transition) {
+-      // store 赋值
+       state.asideTransition = transition
+-      // 持久化
+       await dispatch('d2admin/db/set', {
+         dbName: 'sys',
+         path: 'menu.asideTransition',
+@@ -61,14 +39,8 @@ export default {
+         user: true
+       }, { root: true })
+     },
+-    /**
+-     * 切换侧边栏折叠动画
+-     * @param {Object} context
+-     */
+     async asideTransitionToggle ({ state, dispatch }) {
+-      // store 赋值
+       state.asideTransition = !state.asideTransition
+-      // 持久化
+       await dispatch('d2admin/db/set', {
+         dbName: 'sys',
+         path: 'menu.asideTransition',
+@@ -76,12 +48,7 @@ export default {
+         user: true
+       }, { root: true })
+     },
+-    /**
+-     * 持久化数据加载侧边栏设置
+-     * @param {Object} context
+-     */
+     async asideLoad ({ state, dispatch }) {
+-      // store 赋值
+       const menu = await dispatch('d2admin/db/get', {
+         dbName: 'sys',
+         path: 'menu',
+@@ -93,23 +60,16 @@ export default {
+     }
+   },
+   mutations: {
+-    /**
+-     * @description 设置顶栏菜单
+-     * @param {Object} state state
+-     * @param {Array} menu menu setting
+-     */
+     headerSet (state, menu) {
+-      // store 赋值
+       state.header = menu
+     },
+-    /**
+-     * @description 设置侧边栏菜单
+-     * @param {Object} state state
+-     * @param {Array} menu menu setting
+-     */
+     asideSet (state, menu) {
+-      // store 赋值
+       state.aside = menu
++    },
++    issuesSet (state, issues = {}) {
++      state.issues = issues.list || []
++      state.issuesByKey = issues.byKey || {}
++      state.issuesByOriginalPath = issues.byOriginalPath || {}
+     }
+   }
+ }
+diff --git a/web/src/store/modules/d2admin/modules/search.js b/web/src/store/modules/d2admin/modules/search.js
+index 04e4280d..16d97253 100644
+--- a/web/src/store/modules/d2admin/modules/search.js
++++ b/web/src/store/modules/d2admin/modules/search.js
+@@ -3,47 +3,34 @@ import setting from '@/setting.js'
+ export default {
+   namespaced: true,
+   state: {
+-    // 搜索面板激活状态
+     active: false,
+-    // 快捷键
+     hotkey: {
+       open: setting.hotkey.search.open,
+       close: setting.hotkey.search.close
+     },
+-    // 所有可以搜索的页面
+     pool: []
+   },
+   mutations: {
+-    /**
+-     * @description 切换激活状态
+-     * @param {Object} state state
+-     */
+     toggle (state) {
+       state.active = !state.active
+     },
+-    /**
+-     * @description 设置激活模式
+-     * @param {Object} state state
+-     * @param {Boolean} active active
+-     */
+     set (state, active) {
+       state.active = active
+     },
+-    /**
+-     * @description 初始化
+-     * @param {Object} state state
+-     * @param {Array} menu menu
+-     */
+     init (state, menu) {
+       const pool = []
+       const push = function (menu, titlePrefix = []) {
+         menu.forEach(m => {
++          if (m.menuIssue) {
++            return
++          }
++          const currentTitle = m.title || m.name || '未命名菜单'
+           if (m.children) {
+-            push(m.children, [...titlePrefix, m.title])
+-          } else {
++            push(m.children, [...titlePrefix, currentTitle])
++          } else if (m.path && !/^d2-menu-empty-\d+$/.test(m.path) && !/^d2-menu-error-/.test(m.path)) {
+             pool.push({
+               ...m,
+-              fullTitle: [...titlePrefix, m.title].join(' / ')
++              fullTitle: [...titlePrefix, currentTitle].join(' / ')
+             })
+           }
+         })
