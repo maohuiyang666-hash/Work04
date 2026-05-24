@@ -29,8 +29,8 @@ function webSocketOnError (e) {
  */
 function webSocketOnMessage (e) {
   const data = JSON.parse(e.data)
-  const { refreshUnread, systemConfig } = data
-  if (refreshUnread) {
+  const { refresh_unread, systemConfig } = data
+  if (refresh_unread) {
     // 更新消息通知条数
     store.dispatch('d2admin/messagecenter/setUnread')
   }

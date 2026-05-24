@@ -1,0 +1,50 @@
+diff --git a/backend/dvadmin/system/views/message_center.py b/backend/dvadmin/system/views/message_center.py
+index 67e547b3..b4cd8ff9 100644
+--- a/backend/dvadmin/system/views/message_center.py
++++ b/backend/dvadmin/system/views/message_center.py
+@@ -116,21 +116,24 @@ class MessageCenterCreateSerializer(CustomModelSerializer):
+             users = Users.objects.filter(dept__id__in=target_dept).values_list('id', flat=True)
+         if target_type in [3]:  # 系统通知
+             users = Users.objects.values_list('id', flat=True)
+-            websocket_push("dvadmin", message={"sender": 'system', "contentType": 'SYSTEM',
+-                                               "content": '您有一条新消息~', "refresh_unread": True})
+         targetuser_data = []
+         for user in users:
+             targetuser_data.append({
+                 "messagecenter": data.id,
+                 "users": user
+             })
+-            if target_type in [1,2]:
+-                room_name = f"user_{user}"
+-                websocket_push(room_name, message={"sender": 'system', "contentType": 'SYSTEM',
+-                                                   "content": '您有一条新消息~', "refresh_unread": True})
+         targetuser_instance = MessageCenterTargetUserSerializer(data=targetuser_data, many=True, request=self.request)
+         targetuser_instance.is_valid(raise_exception=True)
+         targetuser_instance.save()
++        # 数据库记录已保存完毕，再进行 WebSocket 推送，避免前端收到通知后查不到新记录
++        if target_type in [3]:  # 系统通知：广播给所有在线用户
++            websocket_push("dvadmin", message={"sender": 'system', "contentType": 'SYSTEM',
++                                               "content": '您有一条新消息~', "refresh_unread": True})
++        else:  # 按用户(0)、按角色(1)、按部门(2)：逐个推送给目标用户
++            for user in users:
++                room_name = f"user_{user}"
++                websocket_push(room_name, message={"sender": 'system', "contentType": 'SYSTEM',
++                                                   "content": '您有一条新消息~', "refresh_unread": True})
+         return data
+ 
+     class Meta:
+diff --git a/web/src/api/websocket.js b/web/src/api/websocket.js
+index 4dbc3a39..3ef10224 100644
+--- a/web/src/api/websocket.js
++++ b/web/src/api/websocket.js
+@@ -29,8 +29,8 @@ function webSocketOnError (e) {
+  */
+ function webSocketOnMessage (e) {
+   const data = JSON.parse(e.data)
+-  const { refreshUnread, systemConfig } = data
+-  if (refreshUnread) {
++  const { refresh_unread, systemConfig } = data
++  if (refresh_unread) {
+     // 更新消息通知条数
+     store.dispatch('d2admin/messagecenter/setUnread')
+   }
