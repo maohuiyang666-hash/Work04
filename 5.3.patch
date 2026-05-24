@@ -1,0 +1,155 @@
+diff --git a/backend/dvadmin/system/views/role.py b/backend/dvadmin/system/views/role.py
+index 727e355b..5ab37aec 100644
+--- a/backend/dvadmin/system/views/role.py
++++ b/backend/dvadmin/system/views/role.py
+@@ -62,13 +62,15 @@ class RoleCreateUpdateSerializer(CustomModelSerializer):
+         return super().validate(attrs)
+ 
+     def save(self, **kwargs):
++        from django.db import transaction
+         is_superuser = self.request.user.is_superuser
+         if not is_superuser:
+-            self.validated_data.pop('admin')
+-        data = super().save(**kwargs)
+-        data.dept.set(self.initial_data.get('dept', []))
+-        data.menu.set(self.initial_data.get('menu', []))
+-        data.permission.set(self.initial_data.get('permission', []))
++            self.validated_data.pop('admin', None)
++        with transaction.atomic():
++            data = super().save(**kwargs)
++            data.dept.set(self.initial_data.get('dept', []))
++            data.menu.set(self.initial_data.get('menu', []))
++            data.permission.set(self.initial_data.get('permission', []))
+         return data
+ 
+     class Meta:
+diff --git a/web/src/views/system/role/crud.js b/web/src/views/system/role/crud.js
+index d68c7605..945f6dbb 100644
+--- a/web/src/views/system/role/crud.js
++++ b/web/src/views/system/role/crud.js
+@@ -34,18 +34,32 @@ export const crudOptions = (vm) => {
+           return !vm.hasPermissions('Delete')
+         }
+       },
+-      custom: [{
+-        show (index, row) {
+-          return true
+-        },
+-        disabled () {
+-          return !vm.hasPermissions('Update')
++      custom: [
++        {
++          show (index, row) {
++            return true
++          },
++          disabled () {
++            return !vm.hasPermissions('Update')
++          },
++          text: '权限管理',
++          type: 'warning',
++          size: 'small',
++          emit: 'createPermission'
+         },
+-        text: '权限管理',
+-        type: 'warning',
+-        size: 'small',
+-        emit: 'createPermission'
+-      }]
++        {
++          show (index, row) {
++            return true
++          },
++          disabled () {
++            return !vm.hasPermissions('Create') || !vm.hasPermissions('Retrieve')
++          },
++          text: '复制',
++          type: 'primary',
++          size: 'small',
++          emit: 'copyRole'
++        }
++      ]
+ 
+     },
+     indexRow: { // 或者直接传true,不显示title，不居中
+diff --git a/web/src/views/system/role/index.vue b/web/src/views/system/role/index.vue
+index 72517e88..70a0cb0b 100644
+--- a/web/src/views/system/role/index.vue
++++ b/web/src/views/system/role/index.vue
+@@ -13,6 +13,8 @@
+       v-bind="_crudProps"
+       v-on="_crudListeners"
+       @createPermission="createPermission"
++      @copyRole="copyRole"
++      @dialog-cancel="handleDialogCancel"
+     >
+       <div slot="header">
+         <crud-search
+@@ -25,7 +27,7 @@
+             size="small"
+             v-permission="'Create'"
+             type="primary"
+-            @click="addRow"
++            @click="handleAdd"
+             ><i class="el-icon-plus" /> 新增</el-button
+           >
+         </el-button-group>
+@@ -78,10 +80,21 @@ export default {
+   data () {
+     return {
+       rolePermissionShow: false,
+-      roleObj: undefined
++      roleObj: undefined,
++      copyRoleData: null
+     }
+   },
+   methods: {
++    handleDialogCancel (done) {
++      this.copyRoleData = null
++      if (typeof done === 'function') {
++        done()
++      }
++    },
++    handleAdd () {
++      this.copyRoleData = null
++      this.addRow()
++    },
+     getCrudOptions () {
+       return crudOptions(this)
+     },
+@@ -89,6 +102,13 @@ export default {
+       return api.GetList(query)
+     },
+     addRequest (row) {
++      if (this.copyRoleData) {
++        row.menu = this.copyRoleData.menu || []
++        row.permission = this.copyRoleData.permission || []
++        row.dept = this.copyRoleData.dept || []
++        row.data_range = this.copyRoleData.data_range || 0
++        this.copyRoleData = null // clear after use
++      }
+       return api.createObj(row)
+     },
+     updateRequest (row) {
+@@ -106,6 +126,22 @@ export default {
+       //   name: 'rolePermission',
+       //   params: { id: scope.row.id }
+       // })
++    },
++    // 复制角色
++    copyRole (scope) {
++      const row = scope.row
++      api.GetObj(row).then(res => {
++        const data = res.data
++        const copyData = {
++          ...data,
++          name: data.name + '_copy',
++          key: '',
++          admin: false // require explicit confirmation
++        }
++        delete copyData.id
++        this.copyRoleData = data // store for addRequest
++        this.getCrud().addRow(copyData)
++      })
+     }
+   }
+ }

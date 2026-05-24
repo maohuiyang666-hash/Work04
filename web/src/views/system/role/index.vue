@@ -13,6 +13,8 @@
       v-bind="_crudProps"
       v-on="_crudListeners"
       @createPermission="createPermission"
+      @copyRole="copyRole"
+      @dialog-cancel="handleDialogCancel"
     >
       <div slot="header">
         <crud-search
@@ -25,7 +27,7 @@
             size="small"
             v-permission="'Create'"
             type="primary"
-            @click="addRow"
+            @click="handleAdd"
             ><i class="el-icon-plus" /> 新增</el-button
           >
         </el-button-group>
@@ -78,10 +80,21 @@ export default {
   data () {
     return {
       rolePermissionShow: false,
-      roleObj: undefined
+      roleObj: undefined,
+      copyRoleData: null
     }
   },
   methods: {
+    handleDialogCancel (done) {
+      this.copyRoleData = null
+      if (typeof done === 'function') {
+        done()
+      }
+    },
+    handleAdd () {
+      this.copyRoleData = null
+      this.addRow()
+    },
     getCrudOptions () {
       return crudOptions(this)
     },
@@ -89,6 +102,13 @@ export default {
       return api.GetList(query)
     },
     addRequest (row) {
+      if (this.copyRoleData) {
+        row.menu = this.copyRoleData.menu || []
+        row.permission = this.copyRoleData.permission || []
+        row.dept = this.copyRoleData.dept || []
+        row.data_range = this.copyRoleData.data_range || 0
+        this.copyRoleData = null // clear after use
+      }
       return api.createObj(row)
     },
     updateRequest (row) {
@@ -106,6 +126,22 @@ export default {
       //   name: 'rolePermission',
       //   params: { id: scope.row.id }
       // })
+    },
+    // 复制角色
+    copyRole (scope) {
+      const row = scope.row
+      api.GetObj(row).then(res => {
+        const data = res.data
+        const copyData = {
+          ...data,
+          name: data.name + '_copy',
+          key: '',
+          admin: false // require explicit confirmation
+        }
+        delete copyData.id
+        this.copyRoleData = data // store for addRequest
+        this.getCrud().addRow(copyData)
+      })
     }
   }
 }
