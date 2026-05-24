@@ -179,13 +179,23 @@ class MessageCenterViewSet(CustomModelViewSet):
     @action(methods=['GET'], detail=False, permission_classes=[IsAuthenticated])
     def get_self_receive(self, request):
         """
-        获取接收到的消息
+        获取接收到的消息,支持按已读状态筛选
         """
         self_user_id = self.request.user.id
-        # queryset = MessageCenterTargetUser.objects.filter(users__id=self_user_id).order_by('-create_datetime')
+        is_read = request.query_params.get('is_read', None)
         queryset = MessageCenter.objects.filter(target_user__id=self_user_id)
-        print(queryset)
-        # queryset = self.filter_queryset(queryset)
+        if is_read is not None and is_read != '':
+            # 筛选: 已读/未读消息(通过中间表 MessageCenterTargetUser)
+            is_read_bool = is_read.lower() == 'true'
+            target_user_filter = MessageCenterTargetUser.objects.filter(
+                users__id=self_user_id,
+                is_read=is_read_bool
+            ).values_list('messagecenter_id', flat=True)
+            if is_read_bool:
+                queryset = queryset.filter(id__in=target_user_filter)
+            else:
+                # 未读: 当前用户在所有关联消息中,排除已读的
+                queryset = queryset.exclude(id__in=target_user_filter)
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = MessageCenterTargetUserListSerializer(page, many=True, request=request)
@@ -205,6 +215,23 @@ class MessageCenterViewSet(CustomModelViewSet):
             serializer = MessageCenterTargetUserListSerializer(queryset.messagecenter, many=False, request=request)
             data = serializer.data
         return DetailResponse(data=data, msg="获取成功")
+
+    @action(methods=['POST'], detail=False, permission_classes=[IsAuthenticated])
+    def batch_mark_read(self, request):
+        """
+        批量标记消息为已读,仅处理当前用户与消息的已读关系,支持幂等
+        """
+        ids = request.data.get('ids', [])
+        if not ids:
+            return DetailResponse(data=None, msg="请选择需要标记的消息")
+        self_user_id = self.request.user.id
+        # 仅更新当前用户未读的消息关联记录,已读的不重复修改
+        updated_count = MessageCenterTargetUser.objects.filter(
+            users__id=self_user_id,
+            messagecenter__id__in=ids,
+            is_read=False
+        ).update(is_read=True)
+        return DetailResponse(data={"updated": updated_count}, msg="操作成功")
 
     @action(methods=['GET'], detail=False, permission_classes=[IsAuthenticated])
     def get_unread_msg(self, request):

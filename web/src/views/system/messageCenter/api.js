@@ -52,3 +52,11 @@ export function DelObj (id) {
     data: { id }
   })
 }
+
+export function BatchMarkRead (ids) {
+  return request({
+    url: urlPrefix + 'batch_mark_read/',
+    method: 'post',
+    data: { ids }
+  })
+}

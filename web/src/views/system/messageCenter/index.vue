@@ -11,6 +11,13 @@
       <div slot="header">
         <crud-search ref="search" :options="crud.searchOptions" @submit="handleSearch"  />
         <el-button size="small" type="primary" @click="addRow"><i class="el-icon-plus"/> 新增</el-button>
+        <el-button
+          v-if="tabActivted === 'receive'"
+          size="small"
+          type="success"
+          :disabled="!multipleSelection || multipleSelection.length === 0"
+          @click="batchMarkRead"
+        ><i class="el-icon-check"/> 批量标记已读</el-button>
         <el-tabs v-model="tabActivted" @tab-click="onTabClick">
           <el-tab-pane label="我的发布" name="send"></el-tab-pane>
           <el-tab-pane label="我的接收" name="receive"></el-tab-pane>
@@ -27,7 +34,7 @@
 </template>
 
 <script>
-import { AddObj, GetObj, GetList, UpdateObj, DelObj, GetSelfReceive } from './api'
+import { AddObj, GetObj, GetList, UpdateObj, DelObj, GetSelfReceive, BatchMarkRead } from './api'
 import { crudOptions } from './crud'
 import { d2CrudPlus } from 'd2-crud-plus'
 import viewTemplate from './viewTemplate.js'
@@ -80,6 +87,18 @@ export default {
     // 关闭事件
     doDialogClosed (context) {
       this.doRefresh()
+    },
+    batchMarkRead () {
+      if (!this.multipleSelection || this.multipleSelection.length === 0) {
+        this.$message.warning('请选择需要标记的消息')
+        return
+      }
+      const ids = this.multipleSelection.map(item => item.id)
+      BatchMarkRead(ids).then(res => {
+        this.$message.success(res.msg || '操作成功')
+        this.$store.dispatch('d2admin/messagecenter/setUnread')
+        this.doRefresh()
+      })
     }
   }
 }

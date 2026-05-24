@@ -5,12 +5,23 @@ export const crudOptions = (vm) => {
     indexRow: { // 或者直接传true,不显示title，不居中
       width: 60,
       title: '序号',
-      align: 'center'
+      align: 'center',
+      show () {
+        return vm.tabActivted !== 'receive'
+      }
+    },
+    selectionRow: {
+      align: 'center',
+      width: 46,
+      show () {
+        return vm.tabActivted === 'receive'
+      }
     },
     options: {
       tableType: 'vxe-table',
       rowKey: true, // 必须设置，true or false
-      height: '100%' // 表格高度100%, 使用toolbar必须设置
+      height: '100%', // 表格高度100%, 使用toolbar必须设置
+      rowId: 'id'
     },
     rowHandle: {
       width: 160,
@@ -77,11 +88,15 @@ export const crudOptions = (vm) => {
         key: 'is_read',
         type: 'select',
         width: 100,
+        search: {
+          disabled: false
+        },
         show () {
           return vm.tabActivted === 'receive'
         },
         dict: {
           data: [
+            { label: '全部', value: '' },
             { label: '已读', value: true, color: 'success' },
             { label: '未读', value: false, color: 'danger' }
           ]
