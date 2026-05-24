@@ -1,0 +1,84 @@
+diff --git a/README.md b/README.md
+index af839cee..73910e1d 100644
+--- a/README.md
++++ b/README.md
+@@ -169,6 +169,37 @@ or gunicorn :
+   gunicorn -c gunicorn_conf.py application.asgi:application
+ ~~~
+ 
++### Code Quality Check
++
++This project provides a lightweight code quality gate. Developers can run basic checks before committing code.
++
++```bash
++# Run from project root directory
++
++# Check both frontend and backend
++./check.sh
++
++# Check frontend only
++./check.sh --frontend
++
++# Check backend only
++./check.sh --backend
++
++# Show help
++./check.sh --help
++```
++
++**Check Items:**
++
++| Item | Description | Exit Code |
++|------|-------------|-----------|
++| Frontend lint | Uses existing `vue-cli-service lint` for code style check | 1 |
++| Frontend build | Runs `vue-cli-service build` to ensure build passes | 2 |
++| Backend Django check | Runs `python manage.py check` for config and dependency validation | 3 |
++| Backend Python syntax | Uses `py_compile` to check syntax and import errors | 4 |
++
++**Exit Codes:** 0=all passed, 5=both frontend and backend failed. Failed checks clearly indicate whether the issue is frontend or backend.
++
+ ### visit backend swagger
+ 
+ * visit url：[http://localhost:8080](http://localhost:8080) (The default address is this one. If you want to change it, follow the configuration file)
+diff --git a/README.zh.md b/README.zh.md
+index 2df480da..54efdacf 100644
+--- a/README.zh.md
++++ b/README.zh.md
+@@ -172,6 +172,37 @@ npm run dev
+   gunicorn -c gunicorn_conf.py application.asgi:application
+ ~~~
+ 
++### 代码质量检查
++
++本项目提供了一套轻量级的代码质量门禁，开发者在提交代码前可一键执行基础检查。
++
++```bash
++# 在项目根目录执行
++
++# 同时检查前端和后端
++./check.sh
++
++# 仅检查前端
++./check.sh --frontend
++
++# 仅检查后端
++./check.sh --backend
++
++# 查看帮助
++./check.sh --help
++```
++
++**检查项说明：**
++
++| 检查项 | 内容 | 失败退出码 |
++|--------|------|-----------|
++| 前端 lint | 使用项目已有的 `vue-cli-service lint` 检查代码风格 | 1 |
++| 前端构建 | 执行 `vue-cli-service build` 确保构建可通过 | 2 |
++| 后端 Django 检查 | 执行 `python manage.py check` 检查配置和依赖 | 3 |
++| 后端 Python 语法 | 使用 `py_compile` 检查语法和导入错误 | 4 |
++
++**退出码汇总：** 0=全部通过，5=前后端均有问题。检查失败时会明确标注是前端问题还是后端问题。
++
+ ### 访问项目
+ 
+ - 访问地址：[http://localhost:8080](http://localhost:8080) (默认为此地址，如有修改请按照配置文件)

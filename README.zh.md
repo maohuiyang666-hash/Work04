@@ -172,6 +172,37 @@ npm run dev
   gunicorn -c gunicorn_conf.py application.asgi:application
 ~~~
 
+### 代码质量检查
+
+本项目提供了一套轻量级的代码质量门禁，开发者在提交代码前可一键执行基础检查。
+
+```bash
+# 在项目根目录执行
+
+# 同时检查前端和后端
+./check.sh
+
+# 仅检查前端
+./check.sh --frontend
+
+# 仅检查后端
+./check.sh --backend
+
+# 查看帮助
+./check.sh --help
+```
+
+**检查项说明：**
+
+| 检查项 | 内容 | 失败退出码 |
+|--------|------|-----------|
+| 前端 lint | 使用项目已有的 `vue-cli-service lint` 检查代码风格 | 1 |
+| 前端构建 | 执行 `vue-cli-service build` 确保构建可通过 | 2 |
+| 后端 Django 检查 | 执行 `python manage.py check` 检查配置和依赖 | 3 |
+| 后端 Python 语法 | 使用 `py_compile` 检查语法和导入错误 | 4 |
+
+**退出码汇总：** 0=全部通过，5=前后端均有问题。检查失败时会明确标注是前端问题还是后端问题。
+
 ### 访问项目
 
 - 访问地址：[http://localhost:8080](http://localhost:8080) (默认为此地址，如有修改请按照配置文件)

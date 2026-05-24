@@ -169,6 +169,37 @@ or gunicorn :
   gunicorn -c gunicorn_conf.py application.asgi:application
 ~~~
 
+### Code Quality Check
+
+This project provides a lightweight code quality gate. Developers can run basic checks before committing code.
+
+```bash
+# Run from project root directory
+
+# Check both frontend and backend
+./check.sh
+
+# Check frontend only
+./check.sh --frontend
+
+# Check backend only
+./check.sh --backend
+
+# Show help
+./check.sh --help
+```
+
+**Check Items:**
+
+| Item | Description | Exit Code |
+|------|-------------|-----------|
+| Frontend lint | Uses existing `vue-cli-service lint` for code style check | 1 |
+| Frontend build | Runs `vue-cli-service build` to ensure build passes | 2 |
+| Backend Django check | Runs `python manage.py check` for config and dependency validation | 3 |
+| Backend Python syntax | Uses `py_compile` to check syntax and import errors | 4 |
+
+**Exit Codes:** 0=all passed, 5=both frontend and backend failed. Failed checks clearly indicate whether the issue is frontend or backend.
+
 ### visit backend swagger
 
 * visit url：[http://localhost:8080](http://localhost:8080) (The default address is this one. If you want to change it, follow the configuration file)
