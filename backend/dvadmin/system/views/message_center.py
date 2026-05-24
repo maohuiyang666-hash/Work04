@@ -176,15 +176,40 @@ class MessageCenterViewSet(CustomModelViewSet):
                                  "content": '您查看了一条消息~', "refresh_unread": True})
         return DetailResponse(data=serializer.data, msg="获取成功")
 
+    @action(methods=['POST'], detail=False, permission_classes=[IsAuthenticated])
+    def batch_mark_read(self, request):
+        """
+        批量标记已读
+        """
+        self_user_id = self.request.user.id
+        keys = request.data.get('keys', [])
+        if not keys:
+            return SuccessResponse(msg="无操作")
+            
+        MessageCenterTargetUser.objects.filter(
+            users__id=self_user_id,
+            messagecenter__id__in=keys,
+            is_read=False
+        ).update(is_read=True)
+        
+        return SuccessResponse(msg="标记成功")
+
     @action(methods=['GET'], detail=False, permission_classes=[IsAuthenticated])
     def get_self_receive(self, request):
         """
         获取接收到的消息
         """
         self_user_id = self.request.user.id
-        # queryset = MessageCenterTargetUser.objects.filter(users__id=self_user_id).order_by('-create_datetime')
         queryset = MessageCenter.objects.filter(target_user__id=self_user_id)
-        print(queryset)
+        
+        is_read = request.query_params.get('is_read')
+        if is_read is not None and is_read != '':
+            if is_read.lower() == 'true' or is_read == '1':
+                queryset = queryset.filter(messagecentertargetuser__is_read=True, messagecentertargetuser__users_id=self_user_id)
+            elif is_read.lower() == 'false' or is_read == '0':
+                queryset = queryset.filter(messagecentertargetuser__is_read=False, messagecentertargetuser__users_id=self_user_id)
+                
+        # print(queryset)
         # queryset = self.filter_queryset(queryset)
         page = self.paginate_queryset(queryset)
         if page is not None:

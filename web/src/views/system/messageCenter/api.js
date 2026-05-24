@@ -45,6 +45,15 @@ export function UpdateObj (obj) {
     data: obj
   })
 }
+
+export function BatchMarkRead (keys) {
+  return request({
+    url: urlPrefix + 'batch_mark_read/',
+    method: 'post',
+    data: { keys }
+  })
+}
+
 export function DelObj (id) {
   return request({
     url: urlPrefix + id + '/',

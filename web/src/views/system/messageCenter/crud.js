@@ -10,7 +10,12 @@ export const crudOptions = (vm) => {
     options: {
       tableType: 'vxe-table',
       rowKey: true, // 必须设置，true or false
-      height: '100%' // 表格高度100%, 使用toolbar必须设置
+      height: '100%', // 表格高度100%, 使用toolbar必须设置
+      rowId: 'id'
+    },
+    selectionRow: {
+      align: 'center',
+      width: 46
     },
     rowHandle: {
       width: 160,
@@ -79,6 +84,12 @@ export const crudOptions = (vm) => {
         width: 100,
         show () {
           return vm.tabActivted === 'receive'
+        },
+        search: {
+          disabled: false,
+          show () {
+            return vm.tabActivted === 'receive'
+          }
         },
         dict: {
           data: [
