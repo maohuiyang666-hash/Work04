@@ -1,0 +1,499 @@
+diff --git a/backend/application/websocketConfig.py b/backend/application/websocketConfig.py
+index 47eface1..1ecffac1 100644
+--- a/backend/application/websocketConfig.py
++++ b/backend/application/websocketConfig.py
+@@ -1,14 +1,12 @@
+ # -*- coding: utf-8 -*-
++import json
+ import urllib
+ 
+-from asgiref.sync import sync_to_async, async_to_sync
++from asgiref.sync import async_to_sync
+ from channels.db import database_sync_to_async
+-from channels.generic.websocket import AsyncJsonWebsocketConsumer, AsyncWebsocketConsumer
+-import json
+-
++from channels.generic.websocket import AsyncJsonWebsocketConsumer
+ from channels.layers import get_channel_layer
+ from jwt import InvalidSignatureError
+-from rest_framework.request import Request
+ 
+ from application import settings
+ 
+@@ -16,14 +14,22 @@ send_dict = {}
+ 
+ 
+ # 发送消息结构体
++def normalize_websocket_message(message):
++    text = dict(message or {})
++    refresh_unread = text.get('refreshUnread', text.get('refresh_unread'))
++    if refresh_unread is not None:
++        text['refreshUnread'] = refresh_unread
++        text['refresh_unread'] = refresh_unread
++    return text
++
++
+ def set_message(sender, msg_type, msg, refresh_unread=False):
+-    text = {
++    return normalize_websocket_message({
+         'sender': sender,
+         'contentType': msg_type,
+         'content': msg,
+         'refresh_unread': refresh_unread
+-    }
+-    return text
++    })
+ 
+ 
+ # 异步获取消息中心的目标用户
+@@ -33,8 +39,7 @@ def _get_message_center_instance(message_id):
+     _MessageCenter = MessageCenter.objects.filter(id=message_id).values_list('target_user', flat=True)
+     if _MessageCenter:
+         return _MessageCenter
+-    else:
+-        return []
++    return []
+ 
+ 
+ @database_sync_to_async
+@@ -60,7 +65,6 @@ class DvadminWebSocket(AsyncJsonWebsocketConsumer):
+             if decoded_result:
+                 self.user_id = decoded_result.get('user_id')
+                 self.room_name = "user_" + str(self.user_id)
+-                # 收到连接时候处理，
+                 await self.channel_layer.group_add(
+                     "dvadmin",
+                     self.channel_name
+@@ -70,20 +74,17 @@ class DvadminWebSocket(AsyncJsonWebsocketConsumer):
+                     self.channel_name
+                 )
+                 await self.accept()
+-                # 主动推送消息
+                 unread_count = await _get_message_unread(self.user_id)
+                 if unread_count == 0:
+-                    # 发送连接成功
+                     await self.send_json(set_message('system', 'SYSTEM', '连接成功'))
+                 else:
+                     await self.send_json(
+-                        set_message('system', 'SYSTEM', "请查看您的未读消息~",
+-                                    refresh_unread=True))
++                        set_message('system', 'SYSTEM', '请查看您的未读消息~', refresh_unread=True)
++                    )
+         except InvalidSignatureError:
+             await self.disconnect(None)
+ 
+     async def disconnect(self, close_code):
+-        # Leave room group
+         await self.channel_layer.group_discard(self.room_name, self.channel_name)
+         await self.channel_layer.group_discard("dvadmin", self.channel_name)
+         print("连接关闭")
+@@ -99,24 +100,16 @@ class MegCenter(DvadminWebSocket):
+     """
+ 
+     async def receive(self, text_data):
+-        # 接受客户端的信息，你处理的函数
+-        text_data_json = json.loads(text_data)
+-        # message_id = text_data_json.get('message_id', None)
+-        # user_list = await _get_message_center_instance(message_id)
+-        # for send_user in user_list:
+-        #     await self.channel_layer.group_send(
+-        #         "user_" + str(send_user),
+-        #         {'type': 'push.message', 'json': text_data_json}
+-        #     )
++        json.loads(text_data)
+ 
+     async def push_message(self, event):
+         """消息发送"""
+-        message = event['json']
++        message = normalize_websocket_message(event['json'])
+         await self.send(text_data=json.dumps(message))
+ 
+ 
+ 
+-def websocket_push(room_name,message):
++def websocket_push(room_name, message):
+     """
+     主动推送
+     @param room_name: 群组名称
+@@ -127,6 +120,6 @@ def websocket_push(room_name,message):
+         room_name,
+         {
+             "type": "push.message",
+-            "json": message
++            "json": normalize_websocket_message(message)
+         }
+     )
+diff --git a/backend/dvadmin/system/views/message_center.py b/backend/dvadmin/system/views/message_center.py
+index 67e547b3..7f4258f1 100644
+--- a/backend/dvadmin/system/views/message_center.py
++++ b/backend/dvadmin/system/views/message_center.py
+@@ -1,12 +1,9 @@
+ # -*- coding: utf-8 -*-
+-import json
+ 
+-from asgiref.sync import async_to_sync
+-from channels.layers import get_channel_layer
+ from django_restql.fields import DynamicSerializerMethodField
+ from rest_framework import serializers
+-from rest_framework.decorators import action, permission_classes
+-from rest_framework.permissions import IsAuthenticated, AllowAny
++from rest_framework.decorators import action
++from rest_framework.permissions import IsAuthenticated
+ 
+ from application.websocketConfig import websocket_push
+ from dvadmin.system.models import MessageCenter, Users, MessageCenterTargetUser
+@@ -26,8 +23,6 @@ class MessageCenterSerializer(CustomModelSerializer):
+ 
+     def get_role_info(self, instance, parsed_query):
+         roles = instance.target_role.all()
+-        # You can do what ever you want in here
+-        # `parsed_query` param is passed to BookSerializer to allow further querying
+         from dvadmin.system.views.role import RoleSerializer
+         serializer = RoleSerializer(
+             roles,
+@@ -38,8 +33,6 @@ class MessageCenterSerializer(CustomModelSerializer):
+ 
+     def get_user_info(self, instance, parsed_query):
+         users = instance.target_user.all()
+-        # You can do what ever you want in here
+-        # `parsed_query` param is passed to BookSerializer to allow further querying
+         from dvadmin.system.views.user import UserSerializer
+         serializer = UserSerializer(
+             users,
+@@ -50,8 +43,6 @@ class MessageCenterSerializer(CustomModelSerializer):
+ 
+     def get_dept_info(self, instance, parsed_query):
+         dept = instance.target_dept.all()
+-        # You can do what ever you want in here
+-        # `parsed_query` param is passed to BookSerializer to allow further querying
+         from dvadmin.system.views.dept import DeptSerializer
+         serializer = DeptSerializer(
+             dept,
+@@ -86,7 +77,7 @@ class MessageCenterTargetUserListSerializer(CustomModelSerializer):
+     def get_is_read(self, instance):
+         user_id = self.request.user.id
+         message_center_id = instance.id
+-        queryset = MessageCenterTargetUser.objects.filter(messagecenter__id=message_center_id,users_id=user_id).first()
++        queryset = MessageCenterTargetUser.objects.filter(messagecenter__id=message_center_id, users_id=user_id).first()
+         if queryset:
+             return queryset.is_read
+         return False
+@@ -102,35 +93,57 @@ class MessageCenterCreateSerializer(CustomModelSerializer):
+     消息中心-新增-序列化器
+     """
+ 
++    @staticmethod
++    def _dedupe_user_ids(user_ids):
++        return list(dict.fromkeys(int(user_id) for user_id in user_ids))
++
++    def _get_target_user_ids(self, target_type, initial_data):
++        if target_type == 1:
++            target_role = initial_data.get('target_role', [])
++            queryset = Users.objects.filter(role__id__in=target_role).values_list('id', flat=True)
++            return self._dedupe_user_ids(queryset)
++        if target_type == 2:
++            target_dept = initial_data.get('target_dept', [])
++            queryset = Users.objects.filter(dept__id__in=target_dept).values_list('id', flat=True)
++            return self._dedupe_user_ids(queryset)
++        if target_type == 3:
++            queryset = Users.objects.values_list('id', flat=True)
++            return self._dedupe_user_ids(queryset)
++        return self._dedupe_user_ids(initial_data.get('target_user', []))
++
++    @staticmethod
++    def _push_message_notification(target_type, user_ids):
++        if not user_ids:
++            return
++        message = {
++            "sender": 'system',
++            "contentType": 'SYSTEM',
++            "content": '您有一条新消息~',
++            "refresh_unread": True
++        }
++        if target_type == 3:
++            websocket_push("dvadmin", message=message)
++            return
++        for user_id in user_ids:
++            websocket_push(f"user_{user_id}", message=message)
++
+     def save(self, **kwargs):
+         data = super().save(**kwargs)
+         initial_data = self.initial_data
+-        target_type = initial_data.get('target_type')
+-        # 在保存之前,根据目标类型,把目标用户查询出来并保存
+-        users = initial_data.get('target_user', [])
+-        if target_type in [1]:  # 按角色
+-            target_role = initial_data.get('target_role',[])
+-            users = Users.objects.filter(role__id__in=target_role).values_list('id', flat=True)
+-        if target_type in [2]:  # 按部门
+-            target_dept = initial_data.get('target_dept',[])
+-            users = Users.objects.filter(dept__id__in=target_dept).values_list('id', flat=True)
+-        if target_type in [3]:  # 系统通知
+-            users = Users.objects.values_list('id', flat=True)
+-            websocket_push("dvadmin", message={"sender": 'system', "contentType": 'SYSTEM',
+-                                               "content": '您有一条新消息~', "refresh_unread": True})
+-        targetuser_data = []
+-        for user in users:
+-            targetuser_data.append({
++        target_type = int(initial_data.get('target_type', 0))
++        user_ids = self._get_target_user_ids(target_type, initial_data)
++        targetuser_data = [
++            {
+                 "messagecenter": data.id,
+-                "users": user
+-            })
+-            if target_type in [1,2]:
+-                room_name = f"user_{user}"
+-                websocket_push(room_name, message={"sender": 'system', "contentType": 'SYSTEM',
+-                                                   "content": '您有一条新消息~', "refresh_unread": True})
+-        targetuser_instance = MessageCenterTargetUserSerializer(data=targetuser_data, many=True, request=self.request)
+-        targetuser_instance.is_valid(raise_exception=True)
+-        targetuser_instance.save()
++                "users": user_id
++            }
++            for user_id in user_ids
++        ]
++        if targetuser_data:
++            targetuser_instance = MessageCenterTargetUserSerializer(data=targetuser_data, many=True, request=self.request)
++            targetuser_instance.is_valid(raise_exception=True)
++            targetuser_instance.save()
++        self._push_message_notification(target_type, user_ids)
+         return data
+ 
+     class Meta:
+@@ -164,16 +177,25 @@ class MessageCenterViewSet(CustomModelViewSet):
+         """
+         pk = kwargs.get('pk')
+         user_id = self.request.user.id
+-        queryset = MessageCenterTargetUser.objects.filter(users__id=user_id, messagecenter__id=pk).first()
+-        if queryset:
+-            queryset.is_read = True
+-            queryset.save()
++        unread_queryset = MessageCenterTargetUser.objects.filter(users__id=user_id, messagecenter__id=pk).first()
++        unread_changed = False
++        if unread_queryset and not unread_queryset.is_read:
++            unread_queryset.is_read = True
++            unread_queryset.save()
++            unread_changed = True
+         instance = self.get_object()
+         serializer = self.get_serializer(instance)
+-        # 主动推送消息
+-        room_name = f"user_{user_id}"
+-        websocket_push(room_name, message={"sender": 'system', "contentType": 'TEXT',
+-                                 "content": '您查看了一条消息~', "refresh_unread": True})
++        if unread_changed:
++            websocket_push(
++                f"user_{user_id}",
++                message={
++                    "sender": 'system',
++                    "contentType": 'TEXT',
++                    "content": '您查看了一条消息~',
++                    "refresh_unread": True,
++                    "skipNotify": True
++                }
++            )
+         return DetailResponse(data=serializer.data, msg="获取成功")
+ 
+     @action(methods=['GET'], detail=False, permission_classes=[IsAuthenticated])
+@@ -182,10 +204,7 @@ class MessageCenterViewSet(CustomModelViewSet):
+         获取接收到的消息
+         """
+         self_user_id = self.request.user.id
+-        # queryset = MessageCenterTargetUser.objects.filter(users__id=self_user_id).order_by('-create_datetime')
+         queryset = MessageCenter.objects.filter(target_user__id=self_user_id)
+-        print(queryset)
+-        # queryset = self.filter_queryset(queryset)
+         page = self.paginate_queryset(queryset)
+         if page is not None:
+             serializer = MessageCenterTargetUserListSerializer(page, many=True, request=request)
+@@ -210,5 +229,5 @@ class MessageCenterViewSet(CustomModelViewSet):
+     def get_unread_msg(self, request):
+         """获取未读消息数量"""
+         self_user_id = self.request.user.id
+-        count = MessageCenterTargetUser.objects.filter(users__id=self_user_id,is_read=False).count()
+-        return DetailResponse(data={"count":count}, msg="获取成功")
+\ No newline at end of file
++        count = MessageCenterTargetUser.objects.filter(users__id=self_user_id, is_read=False).count()
++        return DetailResponse(data={"count": count}, msg="获取成功")
+diff --git a/web/src/api/websocket.js b/web/src/api/websocket.js
+index 4dbc3a39..163fb7b4 100644
+--- a/web/src/api/websocket.js
++++ b/web/src/api/websocket.js
+@@ -1,11 +1,12 @@
+ import ElementUI from 'element-ui'
+ import util from '@/libs/util'
+ import store from '@/store'
+-function initWebSocket (e) {
++
++function initWebSocket () {
+   const token = util.cookies.get('token')
+   if (token) {
+     const wsUri = util.wsBaseURL() + 'ws/' + token + '/'
+-    this.socket = new WebSocket(wsUri)// 这里面的this都指向vue
++    this.socket = new WebSocket(wsUri)
+     this.socket.onerror = webSocketOnError
+     this.socket.onmessage = webSocketOnMessage
+     this.socket.onclose = closeWebsocket
+@@ -22,22 +23,11 @@ function webSocketOnError (e) {
+   })
+ }
+ 
+-/**
+- * 接收消息
+- * @param e
+- * @returns {any}
+- */
+-function webSocketOnMessage (e) {
+-  const data = JSON.parse(e.data)
+-  const { refreshUnread, systemConfig } = data
+-  if (refreshUnread) {
+-    // 更新消息通知条数
+-    store.dispatch('d2admin/messagecenter/setUnread')
+-  }
+-  if (systemConfig) {
+-    // 更新系统配置
+-    this.$store.dispatch('d2admin/settings/load')
+-  }
++function getRefreshUnread (data) {
++  return data.refreshUnread !== undefined ? data.refreshUnread : data.refresh_unread
++}
++
++function showNotification (data) {
+   if (data.contentType === 'SYSTEM') {
+     ElementUI.Notification({
+       title: '系统消息',
+@@ -72,7 +62,22 @@ function webSocketOnMessage (e) {
+     })
+   }
+ }
+-// 关闭websiocket
++
++function webSocketOnMessage (e) {
++  const data = JSON.parse(e.data)
++  const refreshUnread = getRefreshUnread(data)
++  if (refreshUnread) {
++    store.dispatch('d2admin/messagecenter/setUnread')
++  }
++  if (data.systemConfig) {
++    store.dispatch('d2admin/settings/load')
++  }
++  if (data.skipNotify || data.silent || !data.content) {
++    return
++  }
++  showNotification(data)
++}
++
+ function closeWebsocket () {
+   console.log('连接已关闭...')
+   ElementUI.Notification({
+@@ -84,13 +89,12 @@ function closeWebsocket () {
+   })
+ }
+ 
+-/**
+- * 发送消息
+- * @param message
+- */
+ function webSocketSend (message) {
+   this.socket.send(JSON.stringify(message))
+ }
++
+ export default {
+-  initWebSocket, closeWebsocket, webSocketSend
++  initWebSocket,
++  closeWebsocket,
++  webSocketSend
+ }
+diff --git a/web/src/store/modules/d2admin/modules/messagecenter.js b/web/src/store/modules/d2admin/modules/messagecenter.js
+index 43ea3bf1..b204c426 100644
+--- a/web/src/store/modules/d2admin/modules/messagecenter.js
++++ b/web/src/store/modules/d2admin/modules/messagecenter.js
+@@ -2,7 +2,6 @@ import { request } from '@/api/service'
+ export default {
+   namespaced: true,
+   state: {
+-    // 未读消息
+     unread: 0
+   },
+   getters: {
+@@ -11,38 +10,23 @@ export default {
+     }
+   },
+   actions: {
+-    /**
+-     * @description 添加一个日志
+-     * @param {Object} context
+-     * @param {String} param message {String} 信息
+-     * @param {String} param type {String} 类型
+-     * @param {Object} payload meta {Object} 附带的信息
+-     */
+-    async setUnread ({
+-      state,
+-      commit
+-    }, number) {
+-      if (number) {
++    async setUnread ({ commit }, number) {
++      if (number !== undefined && number !== null) {
+         commit('set', number)
+-      } else {
+-        request({
+-          url: '/api/system/message_center/get_unread_msg/',
+-          method: 'get',
+-          params: {}
+-        }).then(res => {
+-          const { data } = res
+-          commit('set', data.count)
+-        })
++        return number
+       }
++      const res = await request({
++        url: '/api/system/message_center/get_unread_msg/',
++        method: 'get',
++        params: {}
++      })
++      const { data } = res
++      commit('set', data.count)
++      return data.count
+     }
+   },
+   mutations: {
+-    /**
+-     * 设置未读消息
+-     * @param state
+-     * @param number
+-     */
+-    async set (state, number) {
++    set (state, number) {
+       state.unread = number
+     }
+   }
+diff --git a/web/src/views/system/messageCenter/index.vue b/web/src/views/system/messageCenter/index.vue
+index 408c8885..c3c6bebe 100644
+--- a/web/src/views/system/messageCenter/index.vue
++++ b/web/src/views/system/messageCenter/index.vue
+@@ -64,21 +64,21 @@ export default {
+     delRequest (row) {
+       return DelObj(row.id)
+     },
+-    onView ({ row, index }) {
++    async onView ({ row, index }) {
+       this.getD2Crud().showDialog({
+         mode: 'view',
+         rowIndex: index,
+         template: viewTemplate
+       })
+-      this.infoRequest(row)
++      await this.infoRequest(row)
++      await this.$store.dispatch('d2admin/messagecenter/setUnread')
+     },
+     onTabClick (tab) {
+       const { name } = tab
+       this.tabActivted = name
+       this.doRefresh()
+     },
+-    // 关闭事件
+-    doDialogClosed (context) {
++    doDialogClosed () {
+       this.doRefresh()
+     }
+   }

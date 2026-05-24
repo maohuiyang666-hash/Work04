@@ -64,21 +64,21 @@ export default {
     delRequest (row) {
       return DelObj(row.id)
     },
-    onView ({ row, index }) {
+    async onView ({ row, index }) {
       this.getD2Crud().showDialog({
         mode: 'view',
         rowIndex: index,
         template: viewTemplate
       })
-      this.infoRequest(row)
+      await this.infoRequest(row)
+      await this.$store.dispatch('d2admin/messagecenter/setUnread')
     },
     onTabClick (tab) {
       const { name } = tab
       this.tabActivted = name
       this.doRefresh()
     },
-    // 关闭事件
-    doDialogClosed (context) {
+    doDialogClosed () {
       this.doRefresh()
     }
   }

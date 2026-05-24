@@ -2,7 +2,6 @@ import { request } from '@/api/service'
 export default {
   namespaced: true,
   state: {
-    // 未读消息
     unread: 0
   },
   getters: {
@@ -11,38 +10,23 @@ export default {
     }
   },
   actions: {
-    /**
-     * @description 添加一个日志
-     * @param {Object} context
-     * @param {String} param message {String} 信息
-     * @param {String} param type {String} 类型
-     * @param {Object} payload meta {Object} 附带的信息
-     */
-    async setUnread ({
-      state,
-      commit
-    }, number) {
-      if (number) {
+    async setUnread ({ commit }, number) {
+      if (number !== undefined && number !== null) {
         commit('set', number)
-      } else {
-        request({
-          url: '/api/system/message_center/get_unread_msg/',
-          method: 'get',
-          params: {}
-        }).then(res => {
-          const { data } = res
-          commit('set', data.count)
-        })
+        return number
       }
+      const res = await request({
+        url: '/api/system/message_center/get_unread_msg/',
+        method: 'get',
+        params: {}
+      })
+      const { data } = res
+      commit('set', data.count)
+      return data.count
     }
   },
   mutations: {
-    /**
-     * 设置未读消息
-     * @param state
-     * @param number
-     */
-    async set (state, number) {
+    set (state, number) {
       state.unread = number
     }
   }

@@ -1,11 +1,12 @@
 import ElementUI from 'element-ui'
 import util from '@/libs/util'
 import store from '@/store'
-function initWebSocket (e) {
+
+function initWebSocket () {
   const token = util.cookies.get('token')
   if (token) {
     const wsUri = util.wsBaseURL() + 'ws/' + token + '/'
-    this.socket = new WebSocket(wsUri)// 这里面的this都指向vue
+    this.socket = new WebSocket(wsUri)
     this.socket.onerror = webSocketOnError
     this.socket.onmessage = webSocketOnMessage
     this.socket.onclose = closeWebsocket
@@ -22,22 +23,11 @@ function webSocketOnError (e) {
   })
 }
 
-/**
- * 接收消息
- * @param e
- * @returns {any}
- */
-function webSocketOnMessage (e) {
-  const data = JSON.parse(e.data)
-  const { refreshUnread, systemConfig } = data
-  if (refreshUnread) {
-    // 更新消息通知条数
-    store.dispatch('d2admin/messagecenter/setUnread')
-  }
-  if (systemConfig) {
-    // 更新系统配置
-    this.$store.dispatch('d2admin/settings/load')
-  }
+function getRefreshUnread (data) {
+  return data.refreshUnread !== undefined ? data.refreshUnread : data.refresh_unread
+}
+
+function showNotification (data) {
   if (data.contentType === 'SYSTEM') {
     ElementUI.Notification({
       title: '系统消息',
@@ -72,7 +62,22 @@ function webSocketOnMessage (e) {
     })
   }
 }
-// 关闭websiocket
+
+function webSocketOnMessage (e) {
+  const data = JSON.parse(e.data)
+  const refreshUnread = getRefreshUnread(data)
+  if (refreshUnread) {
+    store.dispatch('d2admin/messagecenter/setUnread')
+  }
+  if (data.systemConfig) {
+    store.dispatch('d2admin/settings/load')
+  }
+  if (data.skipNotify || data.silent || !data.content) {
+    return
+  }
+  showNotification(data)
+}
+
 function closeWebsocket () {
   console.log('连接已关闭...')
   ElementUI.Notification({
@@ -84,13 +89,12 @@ function closeWebsocket () {
   })
 }
 
-/**
- * 发送消息
- * @param message
- */
 function webSocketSend (message) {
   this.socket.send(JSON.stringify(message))
 }
+
 export default {
-  initWebSocket, closeWebsocket, webSocketSend
+  initWebSocket,
+  closeWebsocket,
+  webSocketSend
 }
