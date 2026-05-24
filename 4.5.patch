@@ -1,0 +1,189 @@
+diff --git a/backend/dvadmin/system/views/message_center.py b/backend/dvadmin/system/views/message_center.py
+index 67e547b3..eb21ffc5 100644
+--- a/backend/dvadmin/system/views/message_center.py
++++ b/backend/dvadmin/system/views/message_center.py
+@@ -180,12 +180,21 @@ class MessageCenterViewSet(CustomModelViewSet):
+     def get_self_receive(self, request):
+         """
+         获取接收到的消息
++        read_status: all=全部, unread=未读, read=已读
+         """
+         self_user_id = self.request.user.id
+-        # queryset = MessageCenterTargetUser.objects.filter(users__id=self_user_id).order_by('-create_datetime')
++        read_status = request.query_params.get('read_status', 'all')
++        
+         queryset = MessageCenter.objects.filter(target_user__id=self_user_id)
+-        print(queryset)
+-        # queryset = self.filter_queryset(queryset)
++        
++        # 根据状态筛选
++        if read_status == 'unread':
++            queryset = queryset.filter(target_user__id=self_user_id, target_user__is_read=False)
++        elif read_status == 'read':
++            queryset = queryset.filter(target_user__id=self_user_id, target_user__is_read=True)
++        
++        queryset = queryset.distinct().order_by('-create_datetime')
++        
+         page = self.paginate_queryset(queryset)
+         if page is not None:
+             serializer = MessageCenterTargetUserListSerializer(page, many=True, request=request)
+@@ -193,6 +202,32 @@ class MessageCenterViewSet(CustomModelViewSet):
+         serializer = MessageCenterTargetUserListSerializer(queryset, many=True, request=request)
+         return SuccessResponse(data=serializer.data, msg="获取成功")
+ 
++    @action(methods=['POST'], detail=False, permission_classes=[IsAuthenticated])
++    def batch_mark_read(self, request):
++        """
++        批量标记已读
++        message_ids: 消息ID列表
++        """
++        self_user_id = self.request.user.id
++        message_ids = request.data.get('message_ids', [])
++        
++        if not message_ids:
++            return DetailResponse(data={"updated_count": 0}, msg="请选择要标记的消息")
++        
++        # 只更新当前用户与这些消息的关系，且只更新未读的消息（幂等处理）
++        updated_count = MessageCenterTargetUser.objects.filter(
++            users_id=self_user_id,
++            messagecenter_id__in=message_ids,
++            is_read=False
++        ).update(is_read=True)
++        
++        # 推送WebSocket更新未读数
++        room_name = f"user_{self_user_id}"
++        websocket_push(room_name, message={"sender": 'system', "contentType": 'TEXT',
++                             "content": '批量标记已读成功~', "refresh_unread": True})
++        
++        return DetailResponse(data={"updated_count": updated_count}, msg="批量标记已读成功")
++
+     @action(methods=['GET'], detail=False, permission_classes=[IsAuthenticated])
+     def get_newest_msg(self, request):
+         """
+diff --git a/web/src/views/system/messageCenter/api.js b/web/src/views/system/messageCenter/api.js
+index 384a7875..77d18ab0 100644
+--- a/web/src/views/system/messageCenter/api.js
++++ b/web/src/views/system/messageCenter/api.js
+@@ -22,6 +22,19 @@ export function GetSelfReceive (query) {
+   })
+ }
+ 
++/**
++ * 批量标记已读
++ * @param ids 消息ID数组
++ * @returns {*}
++ */
++export function BatchMarkRead (ids) {
++  return request({
++    url: urlPrefix + 'batch_mark_read/',
++    method: 'post',
++    data: { message_ids: ids }
++  })
++}
++
+ export function GetObj (obj) {
+   return request({
+     url: urlPrefix + obj.id + '/',
+diff --git a/web/src/views/system/messageCenter/crud.js b/web/src/views/system/messageCenter/crud.js
+index 94a56e76..46f4b2e2 100644
+--- a/web/src/views/system/messageCenter/crud.js
++++ b/web/src/views/system/messageCenter/crud.js
+@@ -10,7 +10,11 @@ export const crudOptions = (vm) => {
+     options: {
+       tableType: 'vxe-table',
+       rowKey: true, // 必须设置，true or false
+-      height: '100%' // 表格高度100%, 使用toolbar必须设置
++      height: '100%', // 表格高度100%, 使用toolbar必须设置
++      selectionConfig: { reserve: true }
++    },
++    selectionConfig: {
++      reserve: true
+     },
+     rowHandle: {
+       width: 160,
+diff --git a/web/src/views/system/messageCenter/index.vue b/web/src/views/system/messageCenter/index.vue
+index 408c8885..1794b853 100644
+--- a/web/src/views/system/messageCenter/index.vue
++++ b/web/src/views/system/messageCenter/index.vue
+@@ -11,10 +11,22 @@
+       <div slot="header">
+         <crud-search ref="search" :options="crud.searchOptions" @submit="handleSearch"  />
+         <el-button size="small" type="primary" @click="addRow"><i class="el-icon-plus"/> 新增</el-button>
++        <el-button
++          v-if="tabActivted === 'receive'"
++          size="small"
++          type="success"
++          :disabled="!multipleSelection || multipleSelection.length === 0"
++          @click="batchMarkRead"
++        ><i class="el-icon-check"/> 批量标记已读</el-button>
+         <el-tabs v-model="tabActivted" @tab-click="onTabClick">
+           <el-tab-pane label="我的发布" name="send"></el-tab-pane>
+           <el-tab-pane label="我的接收" name="receive"></el-tab-pane>
+         </el-tabs>
++        <el-radio-group v-if="tabActivted === 'receive'" v-model="readStatus" size="small" style="margin-bottom: 10px;" @change="onReadStatusChange">
++          <el-radio-button label="all">全部</el-radio-button>
++          <el-radio-button label="unread">未读</el-radio-button>
++          <el-radio-button label="read">已读</el-radio-button>
++        </el-radio-group>
+         <crud-toolbar :search.sync="crud.searchOptions.show"
+                       :compact.sync="crud.pageOptions.compact"
+                       :columns="crud.columns"
+@@ -27,7 +39,7 @@
+ </template>
+ 
+ <script>
+-import { AddObj, GetObj, GetList, UpdateObj, DelObj, GetSelfReceive } from './api'
++import { AddObj, GetObj, GetList, UpdateObj, DelObj, GetSelfReceive, BatchMarkRead } from './api'
+ import { crudOptions } from './crud'
+ import { d2CrudPlus } from 'd2-crud-plus'
+ import viewTemplate from './viewTemplate.js'
+@@ -37,7 +49,8 @@ export default {
+   mixins: [d2CrudPlus.crud],
+   data () {
+     return {
+-      tabActivted: 'send'
++      tabActivted: 'send',
++      readStatus: 'all'
+     }
+   },
+   computed: {
+@@ -48,7 +61,7 @@ export default {
+     },
+     pageRequest (query) {
+       if (this.tabActivted === 'receive') {
+-        return GetSelfReceive({ ...query })
++        return GetSelfReceive({ ...query, read_status: this.readStatus })
+       }
+       return GetList(query)
+     },
+@@ -75,11 +88,30 @@ export default {
+     onTabClick (tab) {
+       const { name } = tab
+       this.tabActivted = name
++      if (name === 'send') {
++        this.readStatus = 'all'
++      }
++      this.doRefresh()
++    },
++    onReadStatusChange (val) {
++      this.readStatus = val
+       this.doRefresh()
+     },
+     // 关闭事件
+     doDialogClosed (context) {
+       this.doRefresh()
++    },
++    batchMarkRead () {
++      if (!this.multipleSelection || this.multipleSelection.length === 0) {
++        this.$message.warning('请选择需要标记的消息')
++        return
++      }
++      const ids = this.multipleSelection.map(item => item.id)
++      BatchMarkRead(ids).then(res => {
++        this.$message.success(res.msg || '操作成功')
++        this.$store.dispatch('d2admin/messagecenter/setUnread')
++        this.doRefresh()
++      })
+     }
+   }
+ }

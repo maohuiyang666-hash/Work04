@@ -10,7 +10,11 @@ export const crudOptions = (vm) => {
     options: {
       tableType: 'vxe-table',
       rowKey: true, // 必须设置，true or false
-      height: '100%' // 表格高度100%, 使用toolbar必须设置
+      height: '100%', // 表格高度100%, 使用toolbar必须设置
+      selectionConfig: { reserve: true }
+    },
+    selectionConfig: {
+      reserve: true
     },
     rowHandle: {
       width: 160,

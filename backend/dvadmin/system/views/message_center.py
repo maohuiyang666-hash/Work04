@@ -180,18 +180,53 @@ class MessageCenterViewSet(CustomModelViewSet):
     def get_self_receive(self, request):
         """
         获取接收到的消息
+        read_status: all=全部, unread=未读, read=已读
         """
         self_user_id = self.request.user.id
-        # queryset = MessageCenterTargetUser.objects.filter(users__id=self_user_id).order_by('-create_datetime')
+        read_status = request.query_params.get('read_status', 'all')
+        
         queryset = MessageCenter.objects.filter(target_user__id=self_user_id)
-        print(queryset)
-        # queryset = self.filter_queryset(queryset)
+        
+        # 根据状态筛选
+        if read_status == 'unread':
+            queryset = queryset.filter(target_user__id=self_user_id, target_user__is_read=False)
+        elif read_status == 'read':
+            queryset = queryset.filter(target_user__id=self_user_id, target_user__is_read=True)
+        
+        queryset = queryset.distinct().order_by('-create_datetime')
+        
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = MessageCenterTargetUserListSerializer(page, many=True, request=request)
             return self.get_paginated_response(serializer.data)
         serializer = MessageCenterTargetUserListSerializer(queryset, many=True, request=request)
         return SuccessResponse(data=serializer.data, msg="获取成功")
+
+    @action(methods=['POST'], detail=False, permission_classes=[IsAuthenticated])
+    def batch_mark_read(self, request):
+        """
+        批量标记已读
+        message_ids: 消息ID列表
+        """
+        self_user_id = self.request.user.id
+        message_ids = request.data.get('message_ids', [])
+        
+        if not message_ids:
+            return DetailResponse(data={"updated_count": 0}, msg="请选择要标记的消息")
+        
+        # 只更新当前用户与这些消息的关系，且只更新未读的消息（幂等处理）
+        updated_count = MessageCenterTargetUser.objects.filter(
+            users_id=self_user_id,
+            messagecenter_id__in=message_ids,
+            is_read=False
+        ).update(is_read=True)
+        
+        # 推送WebSocket更新未读数
+        room_name = f"user_{self_user_id}"
+        websocket_push(room_name, message={"sender": 'system', "contentType": 'TEXT',
+                             "content": '批量标记已读成功~', "refresh_unread": True})
+        
+        return DetailResponse(data={"updated_count": updated_count}, msg="批量标记已读成功")
 
     @action(methods=['GET'], detail=False, permission_classes=[IsAuthenticated])
     def get_newest_msg(self, request):

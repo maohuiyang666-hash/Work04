@@ -22,6 +22,19 @@ export function GetSelfReceive (query) {
   })
 }
 
+/**
+ * 批量标记已读
+ * @param ids 消息ID数组
+ * @returns {*}
+ */
+export function BatchMarkRead (ids) {
+  return request({
+    url: urlPrefix + 'batch_mark_read/',
+    method: 'post',
+    data: { message_ids: ids }
+  })
+}
+
 export function GetObj (obj) {
   return request({
     url: urlPrefix + obj.id + '/',
