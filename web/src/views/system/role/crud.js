@@ -19,7 +19,7 @@ export const crudOptions = (vm) => {
           return !vm.hasPermissions('Retrieve')
         }
       },
-      width: 230,
+      width: 300,
       edit: {
         thin: true,
         text: '',
@@ -34,18 +34,32 @@ export const crudOptions = (vm) => {
           return !vm.hasPermissions('Delete')
         }
       },
-      custom: [{
-        show (index, row) {
-          return true
+      custom: [
+        {
+          show (index, row) {
+            return true
+          },
+          disabled () {
+            return !vm.hasPermissions('Create')
+          },
+          text: '复制',
+          type: 'success',
+          size: 'small',
+          emit: 'copyRole'
         },
-        disabled () {
-          return !vm.hasPermissions('Update')
-        },
-        text: '权限管理',
-        type: 'warning',
-        size: 'small',
-        emit: 'createPermission'
-      }]
+        {
+          show (index, row) {
+            return true
+          },
+          disabled () {
+            return !vm.hasPermissions('Update')
+          },
+          text: '权限管理',
+          type: 'warning',
+          size: 'small',
+          emit: 'createPermission'
+        }
+      ]
 
     },
     indexRow: { // 或者直接传true,不显示title，不居中

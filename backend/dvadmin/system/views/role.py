@@ -6,6 +6,7 @@
 @Created on: 2021/6/3 003 0:30
 @Remark: 角色管理
 """
+from django.db import transaction
 from rest_framework import serializers
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -14,7 +15,7 @@ from dvadmin.system.models import Role, Menu, MenuButton, Dept
 from dvadmin.system.views.dept import DeptSerializer
 from dvadmin.system.views.menu import MenuSerializer
 from dvadmin.system.views.menu_button import MenuButtonSerializer
-from dvadmin.utils.json_response import SuccessResponse, DetailResponse
+from dvadmin.utils.json_response import SuccessResponse, DetailResponse, ErrorResponse
 from dvadmin.utils.serializers import CustomModelSerializer
 from dvadmin.utils.validator import CustomUniqueValidator
 from dvadmin.utils.viewset import CustomModelViewSet
@@ -215,3 +216,49 @@ class RoleViewSet(CustomModelViewSet):
             dept_list = request.user.role.values_list('dept',flat=True)
             queryset = Dept.objects.filter(id__in=dept_list).values('id','name','parent')
         return DetailResponse(data=queryset)
+
+    @action(methods=['GET'], detail=True, permission_classes=[IsAuthenticated])
+    def get_role_detail(self, request, pk=None):
+        """获取角色详情（包含菜单、权限和部门）"""
+        role = self.get_object()
+        serializer = RoleSerializer(role)
+        data = serializer.data
+        # 添加关联的菜单、权限和部门ID列表
+        data['menu'] = list(role.menu.values_list('id', flat=True))
+        data['permission'] = list(role.permission.values_list('id', flat=True))
+        data['dept'] = list(role.dept.values_list('id', flat=True))
+        return DetailResponse(data=data)
+
+    @action(methods=['POST'], detail=True, permission_classes=[IsAuthenticated])
+    def copy_role(self, request, pk=None):
+        """复制角色"""
+        try:
+            with transaction.atomic():
+                original_role = self.get_object()
+                new_role_data = request.data
+                
+                # 检查必填字段
+                if 'name' not in new_role_data or 'key' not in new_role_data:
+                    return ErrorResponse(msg='角色名称和权限标识为必填项')
+                
+                # 创建新角色
+                new_role = Role.objects.create(
+                    name=new_role_data['name'],
+                    key=new_role_data['key'],
+                    sort=new_role_data.get('sort', original_role.sort),
+                    status=new_role_data.get('status', original_role.status),
+                    admin=new_role_data.get('admin', original_role.admin),
+                    data_range=new_role_data.get('data_range', original_role.data_range),
+                    remark=new_role_data.get('remark', original_role.remark)
+                )
+                
+                # 复制关联的菜单、按钮权限和部门
+                new_role.menu.set(original_role.menu.all())
+                new_role.permission.set(original_role.permission.all())
+                new_role.dept.set(original_role.dept.all())
+                
+                # 序列化返回
+                serializer = RoleSerializer(new_role)
+                return DetailResponse(data=serializer.data, msg='角色复制成功')
+        except Exception as e:
+            return ErrorResponse(msg=f'角色复制失败: {str(e)}')

@@ -48,3 +48,20 @@ export function DelObj (id) {
     data: { id }
   })
 }
+
+// 获取角色详情（包含菜单、权限和部门）
+export function GetRoleDetail (id) {
+  return request({
+    url: urlPrefix + id + '/get_role_detail/',
+    method: 'get'
+  })
+}
+
+// 复制角色
+export function CopyRole (id, obj) {
+  return request({
+    url: urlPrefix + id + '/copy_role/',
+    method: 'post',
+    data: obj
+  })
+}

@@ -5,14 +5,14 @@
  * @最后修改时间: 2021-07-29 19:27:29
  * 联系Qq:1638245306
  * @文件介绍:角色管理
--->
-<template>
+--><template>
   <d2-container :class="{ 'page-compact': crud.pageOptions.compact }">
     <d2-crud-x
       ref="d2Crud"
       v-bind="_crudProps"
       v-on="_crudListeners"
       @createPermission="createPermission"
+      @copyRole="copyRole"
     >
       <div slot="header">
         <crud-search
@@ -78,7 +78,8 @@ export default {
   data () {
     return {
       rolePermissionShow: false,
-      roleObj: undefined
+      roleObj: undefined,
+      copyingRoleId: null // 标记是否正在复制角色
     }
   },
   methods: {
@@ -89,13 +90,51 @@ export default {
       return api.GetList(query)
     },
     addRequest (row) {
-      return api.createObj(row)
+      if (this.copyingRoleId) {
+        // 如果是复制角色，使用复制接口
+        const copyData = {
+          name: row.name,
+          key: row.key,
+          sort: row.sort,
+          status: row.status,
+          admin: row.admin,
+          data_range: row.data_range,
+          remark: row.remark
+        }
+        return api.CopyRole(this.copyingRoleId, copyData).then(res => {
+          this.copyingRoleId = null // 重置
+          return res
+        })
+      } else {
+        // 普通新增
+        return api.createObj(row)
+      }
     },
     updateRequest (row) {
       return api.UpdateObj(row)
     },
     delRequest (row) {
       return api.DelObj(row.id)
+    },
+    // 复制角色
+    copyRole (scope) {
+      const originalId = scope.row.id
+      api.GetRoleDetail(originalId).then(res => {
+        const originalData = res.data.data
+        this.copyingRoleId = originalId // 标记正在复制
+        // 准备复制的数据
+        const copyData = {
+          name: originalData.name + '_副本',
+          key: originalData.key + '_copy',
+          sort: originalData.sort,
+          status: originalData.status,
+          admin: originalData.admin,
+          data_range: originalData.data_range,
+          remark: originalData.remark
+        }
+        // 打开新增表单并填充数据
+        this.addRow(copyData)
+      })
     },
     // 授权
     createPermission (scope) {
