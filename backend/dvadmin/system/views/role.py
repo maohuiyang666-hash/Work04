@@ -6,6 +6,7 @@
 @Created on: 2021/6/3 003 0:30
 @Remark: 角色管理
 """
+from django.db import transaction
 from rest_framework import serializers
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -64,11 +65,12 @@ class RoleCreateUpdateSerializer(CustomModelSerializer):
     def save(self, **kwargs):
         is_superuser = self.request.user.is_superuser
         if not is_superuser:
-            self.validated_data.pop('admin')
-        data = super().save(**kwargs)
-        data.dept.set(self.initial_data.get('dept', []))
-        data.menu.set(self.initial_data.get('menu', []))
-        data.permission.set(self.initial_data.get('permission', []))
+            self.validated_data.pop('admin', None)
+        with transaction.atomic():
+            data = super().save(**kwargs)
+            data.dept.set(self.initial_data.get('dept', []))
+            data.menu.set(self.initial_data.get('menu', []))
+            data.permission.set(self.initial_data.get('permission', []))
         return data
 
     class Meta:
@@ -87,9 +89,9 @@ class MenuPermissonSerializer(CustomModelSerializer):
         if is_superuser:
             queryset = MenuButton.objects.filter(menu__id=instance.id)
         else:
-            menu_permission_id_list = self.request.user.role.values_list('permission',flat=True)
-            queryset = MenuButton.objects.filter(id__in=menu_permission_id_list,menu__id=instance.id)
-        serializer = MenuButtonSerializer(queryset,many=True, read_only=True)
+            menu_permission_id_list = self.request.user.role.values_list('permission', flat=True)
+            queryset = MenuButton.objects.filter(id__in=menu_permission_id_list, menu__id=instance.id)
+        serializer = MenuButtonSerializer(queryset, many=True, read_only=True)
         return serializer.data
 
     class Meta:
@@ -116,14 +118,13 @@ class RoleViewSet(CustomModelViewSet):
     def role_get_menu(self, request):
         """根据当前用户的角色返回角色拥有的菜单"""
         is_superuser = request.user.is_superuser
-        is_admin = request.user.role.values_list('admin',flat=True)
+        is_admin = request.user.role.values_list('admin', flat=True)
         if is_superuser or True in is_admin:
             queryset = Menu.objects.filter(status=1).all()
         else:
-            menu_id_list = request.user.role.values_list('menu',flat=True)
+            menu_id_list = request.user.role.values_list('menu', flat=True)
             queryset = Menu.objects.filter(id__in=menu_id_list)
-        # queryset = self.filter_queryset(queryset)
-        serializer = MenuPermissonSerializer(queryset, many=True,request=request)
+        serializer = MenuPermissonSerializer(queryset, many=True, request=request)
         return DetailResponse(data=serializer.data)
 
     @action(methods=['GET'], detail=False, permission_classes=[IsAuthenticated])
@@ -191,7 +192,7 @@ class RoleViewSet(CustomModelViewSet):
                         {
                             "value": 3,
                             "label": '全部数据权限'
-                        }, ]
+                        }]
                 elif item == 4:
                     data = [{
                         "value": 0,
@@ -206,12 +207,12 @@ class RoleViewSet(CustomModelViewSet):
         return DetailResponse(data=data)
 
     @action(methods=['GET'], detail=False, permission_classes=[IsAuthenticated])
-    def data_scope_dept(self,request):
+    def data_scope_dept(self, request):
         """根据当前角色获取部门信息"""
         is_superuser = request.user.is_superuser
         if is_superuser:
-            queryset = Dept.objects.values('id','name','parent')
+            queryset = Dept.objects.values('id', 'name', 'parent')
         else:
-            dept_list = request.user.role.values_list('dept',flat=True)
-            queryset = Dept.objects.filter(id__in=dept_list).values('id','name','parent')
+            dept_list = request.user.role.values_list('dept', flat=True)
+            queryset = Dept.objects.filter(id__in=dept_list).values('id', 'name', 'parent')
         return DetailResponse(data=queryset)

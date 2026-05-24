@@ -1,0 +1,474 @@
+diff --git a/backend/dvadmin/system/views/role.py b/backend/dvadmin/system/views/role.py
+index 727e355b..06093be0 100644
+--- a/backend/dvadmin/system/views/role.py
++++ b/backend/dvadmin/system/views/role.py
+@@ -6,6 +6,7 @@
+ @Created on: 2021/6/3 003 0:30
+ @Remark: 角色管理
+ """
++from django.db import transaction
+ from rest_framework import serializers
+ from rest_framework.decorators import action
+ from rest_framework.permissions import IsAuthenticated
+@@ -64,11 +65,12 @@ class RoleCreateUpdateSerializer(CustomModelSerializer):
+     def save(self, **kwargs):
+         is_superuser = self.request.user.is_superuser
+         if not is_superuser:
+-            self.validated_data.pop('admin')
+-        data = super().save(**kwargs)
+-        data.dept.set(self.initial_data.get('dept', []))
+-        data.menu.set(self.initial_data.get('menu', []))
+-        data.permission.set(self.initial_data.get('permission', []))
++            self.validated_data.pop('admin', None)
++        with transaction.atomic():
++            data = super().save(**kwargs)
++            data.dept.set(self.initial_data.get('dept', []))
++            data.menu.set(self.initial_data.get('menu', []))
++            data.permission.set(self.initial_data.get('permission', []))
+         return data
+ 
+     class Meta:
+@@ -87,9 +89,9 @@ class MenuPermissonSerializer(CustomModelSerializer):
+         if is_superuser:
+             queryset = MenuButton.objects.filter(menu__id=instance.id)
+         else:
+-            menu_permission_id_list = self.request.user.role.values_list('permission',flat=True)
+-            queryset = MenuButton.objects.filter(id__in=menu_permission_id_list,menu__id=instance.id)
+-        serializer = MenuButtonSerializer(queryset,many=True, read_only=True)
++            menu_permission_id_list = self.request.user.role.values_list('permission', flat=True)
++            queryset = MenuButton.objects.filter(id__in=menu_permission_id_list, menu__id=instance.id)
++        serializer = MenuButtonSerializer(queryset, many=True, read_only=True)
+         return serializer.data
+ 
+     class Meta:
+@@ -116,14 +118,13 @@ class RoleViewSet(CustomModelViewSet):
+     def role_get_menu(self, request):
+         """根据当前用户的角色返回角色拥有的菜单"""
+         is_superuser = request.user.is_superuser
+-        is_admin = request.user.role.values_list('admin',flat=True)
++        is_admin = request.user.role.values_list('admin', flat=True)
+         if is_superuser or True in is_admin:
+             queryset = Menu.objects.filter(status=1).all()
+         else:
+-            menu_id_list = request.user.role.values_list('menu',flat=True)
++            menu_id_list = request.user.role.values_list('menu', flat=True)
+             queryset = Menu.objects.filter(id__in=menu_id_list)
+-        # queryset = self.filter_queryset(queryset)
+-        serializer = MenuPermissonSerializer(queryset, many=True,request=request)
++        serializer = MenuPermissonSerializer(queryset, many=True, request=request)
+         return DetailResponse(data=serializer.data)
+ 
+     @action(methods=['GET'], detail=False, permission_classes=[IsAuthenticated])
+@@ -191,7 +192,7 @@ class RoleViewSet(CustomModelViewSet):
+                         {
+                             "value": 3,
+                             "label": '全部数据权限'
+-                        }, ]
++                        }]
+                 elif item == 4:
+                     data = [{
+                         "value": 0,
+@@ -206,12 +207,12 @@ class RoleViewSet(CustomModelViewSet):
+         return DetailResponse(data=data)
+ 
+     @action(methods=['GET'], detail=False, permission_classes=[IsAuthenticated])
+-    def data_scope_dept(self,request):
++    def data_scope_dept(self, request):
+         """根据当前角色获取部门信息"""
+         is_superuser = request.user.is_superuser
+         if is_superuser:
+-            queryset = Dept.objects.values('id','name','parent')
++            queryset = Dept.objects.values('id', 'name', 'parent')
+         else:
+-            dept_list = request.user.role.values_list('dept',flat=True)
+-            queryset = Dept.objects.filter(id__in=dept_list).values('id','name','parent')
+-        return DetailResponse(data=queryset)
+\ No newline at end of file
++            dept_list = request.user.role.values_list('dept', flat=True)
++            queryset = Dept.objects.filter(id__in=dept_list).values('id', 'name', 'parent')
++        return DetailResponse(data=queryset)
+diff --git a/web/src/views/system/role/crud.js b/web/src/views/system/role/crud.js
+index d68c7605..a4281038 100644
+--- a/web/src/views/system/role/crud.js
++++ b/web/src/views/system/role/crud.js
+@@ -5,11 +5,10 @@ export const crudOptions = (vm) => {
+     },
+     options: {
+       tableType: 'vxe-table',
+-      rowKey: true, // 必须设置，true or false
++      rowKey: true,
+       rowId: 'id',
+-      height: '100%', // 表格高度100%, 使用toolbar必须设置
++      height: '100%',
+       highlightCurrentRow: false
+-
+     },
+     rowHandle: {
+       view: {
+@@ -19,7 +18,7 @@ export const crudOptions = (vm) => {
+           return !vm.hasPermissions('Retrieve')
+         }
+       },
+-      width: 230,
++      width: 300,
+       edit: {
+         thin: true,
+         text: '',
+@@ -35,7 +34,18 @@ export const crudOptions = (vm) => {
+         }
+       },
+       custom: [{
+-        show (index, row) {
++        show () {
++          return true
++        },
++        disabled () {
++          return !vm.hasPermissions('Create')
++        },
++        text: '复制',
++        type: 'primary',
++        size: 'small',
++        emit: 'copyRole'
++      }, {
++        show () {
+           return true
+         },
+         disabled () {
+@@ -46,19 +56,17 @@ export const crudOptions = (vm) => {
+         size: 'small',
+         emit: 'createPermission'
+       }]
+-
+     },
+-    indexRow: { // 或者直接传true,不显示title，不居中
++    indexRow: {
+       title: '序号',
+       align: 'center',
+       width: 100
+     },
+-
+     viewOptions: {
+       componentType: 'form'
+     },
+     formOptions: {
+-      defaultSpan: 24, // 默认的表单 span
++      defaultSpan: 24,
+       width: '35%'
+     },
+     columns: [{
+@@ -78,7 +86,7 @@ export const crudOptions = (vm) => {
+           placeholder: '请输入关键词'
+         }
+       },
+-      view: { // 查看对话框组件的单独配置
++      view: {
+         disabled: true
+       }
+     },
+@@ -91,7 +99,6 @@ export const crudOptions = (vm) => {
+         disabled: true
+       }
+     },
+-
+     {
+       title: '角色名称',
+       key: 'name',
+@@ -105,10 +112,9 @@ export const crudOptions = (vm) => {
+           }
+         }
+       },
+-
+       type: 'input',
+       form: {
+-        rules: [ // 表单校验规则
++        rules: [
+           { required: true, message: '角色名称必填项' }
+         ],
+         component: {
+@@ -128,7 +134,7 @@ export const crudOptions = (vm) => {
+       sortable: true,
+       minWidth: 100,
+       form: {
+-        rules: [ // 表单校验规则
++        rules: [
+           { required: true, message: '权限标识必填项' }
+         ],
+         component: {
+@@ -167,7 +173,7 @@ export const crudOptions = (vm) => {
+         value: false,
+         component: {
+           placeholder: '请选择是否管理员',
+-          show (context) {
++          show () {
+             return vm.info.is_superuser
+           }
+         }
+diff --git a/web/src/views/system/role/index.vue b/web/src/views/system/role/index.vue
+index 72517e88..b9f296bd 100644
+--- a/web/src/views/system/role/index.vue
++++ b/web/src/views/system/role/index.vue
+@@ -12,6 +12,7 @@
+       ref="d2Crud"
+       v-bind="_crudProps"
+       v-on="_crudListeners"
++      @copyRole="copyRole"
+       @createPermission="createPermission"
+     >
+       <div slot="header">
+@@ -38,17 +39,74 @@
+         />
+       </div>
+     </d2-crud-x>
+-<!--  角色授权  -->
++    <el-dialog
++      title="复制角色"
++      :visible.sync="copyDialogVisible"
++      width="520px"
++      append-to-body
++      :close-on-click-modal="false"
++      @closed="handleCopyDialogClosed"
++    >
++      <div v-loading="copyLoading">
++        <el-alert
++          v-if="copySourceRole"
++          title="将继承源角色的菜单、按钮权限、数据权限范围和自定义部门"
++          :description="'复制源角色：' + copySourceRole.name + '。保存后将直接生成新角色，并可继续进入权限页面核对结果。'"
++          type="info"
++          :closable="false"
++          show-icon
++        />
++        <el-form
++          ref="copyForm"
++          :model="copyForm"
++          :rules="copyRules"
++          label-width="100px"
++          class="copy-form"
++        >
++          <el-form-item label="角色名称" prop="name">
++            <el-input v-model="copyForm.name" clearable maxlength="50" />
++          </el-form-item>
++          <el-form-item label="权限标识" prop="key">
++            <el-input v-model="copyForm.key" clearable maxlength="50" />
++          </el-form-item>
++          <el-form-item label="排序" prop="sort">
++            <el-input-number v-model="copyForm.sort" :min="1" :step="1" controls-position="right" />
++          </el-form-item>
++          <el-form-item label="状态" prop="status">
++            <el-radio-group v-model="copyForm.status">
++              <el-radio :label="true">启用</el-radio>
++              <el-radio :label="false">停用</el-radio>
++            </el-radio-group>
++          </el-form-item>
++          <el-form-item v-if="info.is_superuser" label="是否管理员" prop="admin">
++            <el-radio-group v-model="copyForm.admin">
++              <el-radio :label="true">是</el-radio>
++              <el-radio :label="false">否</el-radio>
++            </el-radio-group>
++            <div v-if="copySourceRole && copySourceRole.admin" class="copy-form-tip">
++              源角色带有管理员属性，请显式确认新角色是否保留该属性
++            </div>
++          </el-form-item>
++          <el-form-item label="备注" prop="remark">
++            <el-input v-model="copyForm.remark" type="textarea" :rows="3" maxlength="255" show-word-limit />
++          </el-form-item>
++        </el-form>
++      </div>
++      <span slot="footer">
++        <el-button @click="copyDialogVisible = false">取 消</el-button>
++        <el-button type="primary" :loading="copySubmitting" @click="submitCopyRole">保 存</el-button>
++      </span>
++    </el-dialog>
+     <div>
+       <el-drawer
+         title="角色授权"
+         :visible.sync="rolePermissionShow"
+         direction="rtl"
+         size="70%"
+-        >
++      >
+         <template slot="title">
+           <div>
+-            当前角色<el-tag>{{roleObj?roleObj.name:'无'}}</el-tag>
++            当前角色<el-tag>{{ roleObj ? roleObj.name : '无' }}</el-tag>
+           </div>
+         </template>
+         <div>
+@@ -78,10 +136,63 @@ export default {
+   data () {
+     return {
+       rolePermissionShow: false,
+-      roleObj: undefined
++      roleObj: undefined,
++      copyDialogVisible: false,
++      copyLoading: false,
++      copySubmitting: false,
++      copySourceRole: undefined,
++      copyForm: {
++        name: '',
++        key: '',
++        sort: 1,
++        status: true,
++        admin: false,
++        remark: '',
++        data_range: 0,
++        menu: [],
++        permission: [],
++        dept: []
++      },
++      copyRules: {
++        name: [
++          { required: true, message: '请输入角色名称', trigger: 'blur' }
++        ],
++        key: [
++          { required: true, message: '请输入权限标识', trigger: 'blur' }
++        ],
++        sort: [
++          { required: true, message: '请输入排序', trigger: 'change' }
++        ],
++        admin: [
++          {
++            validator: (rule, value, callback) => {
++              if (this.info.is_superuser && this.copySourceRole && this.copySourceRole.admin && value !== true && value !== false) {
++                callback(new Error('请明确选择是否管理员'))
++                return
++              }
++              callback()
++            },
++            trigger: 'change'
++          }
++        ]
++      }
+     }
+   },
+   methods: {
++    getDefaultCopyForm () {
++      return {
++        name: '',
++        key: '',
++        sort: 1,
++        status: true,
++        admin: false,
++        remark: '',
++        data_range: 0,
++        menu: [],
++        permission: [],
++        dept: []
++      }
++    },
+     getCrudOptions () {
+       return crudOptions(this)
+     },
+@@ -97,15 +208,90 @@ export default {
+     delRequest (row) {
+       return api.DelObj(row.id)
+     },
+-    // 授权
++    buildCopyName (name) {
++      return (name || '角色') + '-副本'
++    },
++    buildCopyKey (key) {
++      const normalizedKey = String(key || 'role').replace(/[^A-Za-z0-9_:-]/g, '_')
++      return normalizedKey + '_copy'
++    },
++    normalizeArray (value) {
++      return Array.isArray(value) ? value.slice() : []
++    },
++    buildCopyForm (sourceRole) {
++      return {
++        name: this.buildCopyName(sourceRole.name),
++        key: this.buildCopyKey(sourceRole.key),
++        sort: sourceRole.sort || 1,
++        status: typeof sourceRole.status === 'boolean' ? sourceRole.status : true,
++        admin: sourceRole.admin ? null : false,
++        remark: sourceRole.remark || '',
++        data_range: typeof sourceRole.data_range === 'number' ? sourceRole.data_range : 0,
++        menu: this.normalizeArray(sourceRole.menu),
++        permission: this.normalizeArray(sourceRole.permission),
++        dept: this.normalizeArray(sourceRole.dept)
++      }
++    },
++    openPermissionDrawer (role) {
++      this.rolePermissionShow = false
++      this.roleObj = undefined
++      this.$nextTick(() => {
++        this.roleObj = role
++        this.rolePermissionShow = true
++      })
++    },
+     createPermission (scope) {
+-      console.log(scope)
+-      this.roleObj = scope.row
+-      this.rolePermissionShow = true
+-      // this.$router.push({
+-      //   name: 'rolePermission',
+-      //   params: { id: scope.row.id }
+-      // })
++      api.GetObj({ id: scope.row.id }).then(res => {
++        this.openPermissionDrawer(res.data.data)
++      })
++    },
++    copyRole (scope) {
++      this.copyLoading = true
++      this.copyDialogVisible = true
++      api.GetObj({ id: scope.row.id }).then(res => {
++        const sourceRole = res.data.data
++        this.copySourceRole = sourceRole
++        this.copyForm = this.buildCopyForm(sourceRole)
++        this.$nextTick(() => {
++          if (this.$refs.copyForm) {
++            this.$refs.copyForm.clearValidate()
++          }
++        })
++      }).catch(() => {
++        this.copyDialogVisible = false
++      }).finally(() => {
++        this.copyLoading = false
++      })
++    },
++    submitCopyRole () {
++      this.$refs.copyForm.validate(valid => {
++        if (!valid) {
++          return
++        }
++        const payload = Object.assign({}, this.copyForm)
++        if (!this.info.is_superuser) {
++          delete payload.admin
++        }
++        this.copySubmitting = true
++        api.createObj(payload).then(res => {
++          const roleId = res.data.data.id
++          this.copyDialogVisible = false
++          this.doRefresh()
++          return api.GetObj({ id: roleId })
++        }).then(res => {
++          this.$message.success('复制成功')
++          this.openPermissionDrawer(res.data.data)
++        }).finally(() => {
++          this.copySubmitting = false
++        })
++      })
++    },
++    handleCopyDialogClosed () {
++      this.copySourceRole = undefined
++      this.copyForm = this.getDefaultCopyForm()
++      if (this.$refs.copyForm) {
++        this.$refs.copyForm.clearValidate()
++      }
+     }
+   }
+ }
+@@ -117,4 +303,14 @@ export default {
+     color: #49a1ff;
+   }
+ }
++
++.copy-form {
++  margin-top: 20px;
++}
++
++.copy-form-tip {
++  margin-top: 8px;
++  color: #e6a23c;
++  line-height: 20px;
++}
+ </style>

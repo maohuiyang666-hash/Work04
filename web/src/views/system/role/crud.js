@@ -5,11 +5,10 @@ export const crudOptions = (vm) => {
     },
     options: {
       tableType: 'vxe-table',
-      rowKey: true, // 必须设置，true or false
+      rowKey: true,
       rowId: 'id',
-      height: '100%', // 表格高度100%, 使用toolbar必须设置
+      height: '100%',
       highlightCurrentRow: false
-
     },
     rowHandle: {
       view: {
@@ -19,7 +18,7 @@ export const crudOptions = (vm) => {
           return !vm.hasPermissions('Retrieve')
         }
       },
-      width: 230,
+      width: 300,
       edit: {
         thin: true,
         text: '',
@@ -35,7 +34,18 @@ export const crudOptions = (vm) => {
         }
       },
       custom: [{
-        show (index, row) {
+        show () {
+          return true
+        },
+        disabled () {
+          return !vm.hasPermissions('Create')
+        },
+        text: '复制',
+        type: 'primary',
+        size: 'small',
+        emit: 'copyRole'
+      }, {
+        show () {
           return true
         },
         disabled () {
@@ -46,19 +56,17 @@ export const crudOptions = (vm) => {
         size: 'small',
         emit: 'createPermission'
       }]
-
     },
-    indexRow: { // 或者直接传true,不显示title，不居中
+    indexRow: {
       title: '序号',
       align: 'center',
       width: 100
     },
-
     viewOptions: {
       componentType: 'form'
     },
     formOptions: {
-      defaultSpan: 24, // 默认的表单 span
+      defaultSpan: 24,
       width: '35%'
     },
     columns: [{
@@ -78,7 +86,7 @@ export const crudOptions = (vm) => {
           placeholder: '请输入关键词'
         }
       },
-      view: { // 查看对话框组件的单独配置
+      view: {
         disabled: true
       }
     },
@@ -91,7 +99,6 @@ export const crudOptions = (vm) => {
         disabled: true
       }
     },
-
     {
       title: '角色名称',
       key: 'name',
@@ -105,10 +112,9 @@ export const crudOptions = (vm) => {
           }
         }
       },
-
       type: 'input',
       form: {
-        rules: [ // 表单校验规则
+        rules: [
           { required: true, message: '角色名称必填项' }
         ],
         component: {
@@ -128,7 +134,7 @@ export const crudOptions = (vm) => {
       sortable: true,
       minWidth: 100,
       form: {
-        rules: [ // 表单校验规则
+        rules: [
           { required: true, message: '权限标识必填项' }
         ],
         component: {
@@ -167,7 +173,7 @@ export const crudOptions = (vm) => {
         value: false,
         component: {
           placeholder: '请选择是否管理员',
-          show (context) {
+          show () {
             return vm.info.is_superuser
           }
         }
