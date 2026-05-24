@@ -170,7 +170,7 @@ Vue.use(D2pUploader, {
     domain: 'http://d2p.file.veryreader.com'
   },
   form: {
-    action: util.baseURL() + 'api/system/file/',
+    action: util.buildUploadURL(),
     name: 'file',
     data: {}, // 上传附加参数
     headers () {

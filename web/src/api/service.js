@@ -115,6 +115,7 @@ function createService () {
     },
     error => {
       const status = get(error, 'response.status')
+      const runtimeConfig = util.inspectRuntimeConfig()
       switch (status) {
         case 400:
           error.message = '请求错误'
@@ -154,6 +155,9 @@ function createService () {
           error.message = 'HTTP版本不受支持'
           break
         default:
+          if (process.env.NODE_ENV === 'development' && runtimeConfig.errors.length) {
+            error.message = `请求未发送成功，请检查接口配置。API 地址：${runtimeConfig.apiBaseURL || runtimeConfig.rawApiBaseURL || '(空)'}`
+          }
           break
       }
       errorLog(error)

@@ -1,0 +1,391 @@
+diff --git a/web/src/api/service.js b/web/src/api/service.js
+index 68ec788c..0c22a525 100644
+--- a/web/src/api/service.js
++++ b/web/src/api/service.js
+@@ -115,6 +115,7 @@ function createService () {
+     },
+     error => {
+       const status = get(error, 'response.status')
++      const runtimeConfig = util.inspectRuntimeConfig()
+       switch (status) {
+         case 400:
+           error.message = '请求错误'
+@@ -154,6 +155,9 @@ function createService () {
+           error.message = 'HTTP版本不受支持'
+           break
+         default:
++          if (process.env.NODE_ENV === 'development' && runtimeConfig.errors.length) {
++            error.message = `请求未发送成功，请检查接口配置。API 地址：${runtimeConfig.apiBaseURL || runtimeConfig.rawApiBaseURL || '(空)'}`
++          }
+           break
+       }
+       errorLog(error)
+diff --git a/web/src/api/websocket.js b/web/src/api/websocket.js
+index 4dbc3a39..592f9948 100644
+--- a/web/src/api/websocket.js
++++ b/web/src/api/websocket.js
+@@ -4,8 +4,23 @@ import store from '@/store'
+ function initWebSocket (e) {
+   const token = util.cookies.get('token')
+   if (token) {
+-    const wsUri = util.wsBaseURL() + 'ws/' + token + '/'
+-    this.socket = new WebSocket(wsUri)// 这里面的this都指向vue
++    const wsBaseURL = util.wsBaseURL()
++    const wsUri = wsBaseURL ? wsBaseURL + 'ws/' + token + '/' : ''
++    if (!wsUri) {
++      if (process.env.NODE_ENV === 'development') {
++        const runtimeConfig = util.inspectRuntimeConfig()
++        ElementUI.Notification({
++          title: '',
++          message: `WebSocket地址无效，请检查配置。当前地址：${runtimeConfig.wsBaseURL || '(空)'}`,
++          type: 'error',
++          position: 'bottom-right',
++          duration: 3000
++        })
++      }
++      return
++    }
++    this.socket = new WebSocket(wsUri)
++    this.socket.wsUri = wsUri
+     this.socket.onerror = webSocketOnError
+     this.socket.onmessage = webSocketOnMessage
+     this.socket.onclose = closeWebsocket
+@@ -13,9 +28,11 @@ function initWebSocket (e) {
+ }
+ 
+ function webSocketOnError (e) {
++  const runtimeConfig = util.inspectRuntimeConfig()
++  const detail = process.env.NODE_ENV === 'development' ? `，请检查 WebSocket 地址：${runtimeConfig.wsBaseURL || '(空)'}` : ''
+   ElementUI.Notification({
+     title: '',
+-    message: 'WebSocket连接发生错误' + JSON.stringify(e),
++    message: 'WebSocket连接发生错误' + detail,
+     type: 'error',
+     position: 'bottom-right',
+     duration: 3000
+diff --git a/web/src/install.js b/web/src/install.js
+index 060a2904..b2b21754 100644
+--- a/web/src/install.js
++++ b/web/src/install.js
+@@ -170,7 +170,7 @@ Vue.use(D2pUploader, {
+     domain: 'http://d2p.file.veryreader.com'
+   },
+   form: {
+-    action: util.baseURL() + 'api/system/file/',
++    action: util.buildUploadURL(),
+     name: 'file',
+     data: {}, // 上传附加参数
+     headers () {
+diff --git a/web/src/libs/util.js b/web/src/libs/util.js
+index aa181e2c..653f7f08 100644
+--- a/web/src/libs/util.js
++++ b/web/src/libs/util.js
+@@ -3,6 +3,11 @@ import db from './util.db'
+ import log from './util.log'
+ import dayjs from 'dayjs'
+ import filterParams from './util.params'
++
++const HTTP_URL_REGEXP = /^https?:\/\//i
++const WS_URL_REGEXP = /^wss?:\/\//i
++const DEV_CONFIG_ERROR_FLAG = '__dvadminRuntimeConfigErrorShown__'
++
+ const util = {
+   cookies,
+   db,
+@@ -10,6 +15,79 @@ const util = {
+   filterParams
+ }
+ 
++function normalizeValue (value) {
++  return typeof value === 'string' ? value.trim() : ''
++}
++
++function ensureTrailingSlash (value) {
++  if (!value) {
++    return value
++  }
++  return value.endsWith('/') ? value : `${value}/`
++}
++
++function trimLeadingSlash (value) {
++  return normalizeValue(value).replace(/^\/+/, '')
++}
++
++function getLocationOrigin () {
++  return location.protocol + '//' + location.hostname + (location.port ? ':' + location.port : '')
++}
++
++function buildTenantBaseURL (baseURL, param) {
++  var host = baseURL.split('/')[2]
++  if (host) {
++    try {
++      const parsedURL = new URL(baseURL)
++      const port = parsedURL.port || (parsedURL.protocol === 'https:' ? '443' : '80')
++      const tenantHost = port === '80' || port === '443' ? document.domain : document.domain + ':' + port
++      return parsedURL.protocol + '//' + tenantHost + (param ? '/' + param : '/')
++    } catch (error) {
++      return baseURL
++    }
++  }
++  return getLocationOrigin() + baseURL
++}
++
++function buildWsURLFromApiBase (baseURL) {
++  const normalizedBaseURL = ensureTrailingSlash(normalizeValue(baseURL))
++  if (!normalizedBaseURL) {
++    return ''
++  }
++  if (WS_URL_REGEXP.test(normalizedBaseURL)) {
++    return normalizedBaseURL
++  }
++  if (HTTP_URL_REGEXP.test(normalizedBaseURL)) {
++    return normalizedBaseURL.replace(/^http/i, 'ws')
++  }
++  if (normalizedBaseURL.startsWith('/')) {
++    return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + normalizedBaseURL
++  }
++  return ''
++}
++
++function buildApiTargetURL (path) {
++  const baseURL = util.baseURL()
++  const normalizedPath = trimLeadingSlash(path)
++  if (!baseURL) {
++    return normalizedPath
++  }
++  return normalizedPath ? ensureTrailingSlash(baseURL) + normalizedPath : ensureTrailingSlash(baseURL)
++}
++
++function getRuntimeConfigSnapshot () {
++  const apiBaseURL = util.baseURL()
++  const wsBaseURL = util.wsBaseURL()
++  const fileBaseURL = util.baseFileURL()
++  return {
++    apiBaseURL,
++    wsBaseURL,
++    fileBaseURL,
++    uploadURL: util.buildUploadURL(),
++    ueditorServerURL: util.buildUeditorServerURL()
++  }
++}
++
+ /**
+  * @description 更新标题
+  * @param {String} titleText 标题
+@@ -32,34 +110,28 @@ util.open = function (url) {
+   a.click()
+   document.body.removeChild(document.getElementById('d2admin-link-temp'))
+ }
++
++util.isTenantMode = function () {
++  return !!(window.pluginsAll && window.pluginsAll.indexOf('dvadmin-tenants-web') !== -1)
++}
++
++util.getRawApiBaseURL = function () {
++  return normalizeValue(process.env.VUE_APP_API)
++}
++
+ /**
+  * @description 校验是否为租户模式。租户模式把域名替换成 域名 加端口
+  */
+ util.baseURL = function () {
+-  var baseURL = process.env.VUE_APP_API
+-  var param = baseURL.split('/')[3] || ''
+-  if (window.pluginsAll && window.pluginsAll.indexOf('dvadmin-tenants-web') !== -1 && (!param || baseURL.startsWith('/'))) {
+-    // 1.把127.0.0.1 替换成和前端一样域名
+-    // 2.把 ip 地址替换成和前端一样域名
+-    // 3.把 /api 或其他类似的替换成和前端一样域名
+-    // document.domain
+-    var host = baseURL.split('/')[2]
+-    if (host) {
+-      var prot = baseURL.split(':')[2] || 80
+-      if (prot === 80 || prot === 443) {
+-        host = document.domain
+-      } else {
+-        host = document.domain + ':' + prot
+-      }
+-      baseURL = baseURL.split('/')[0] + '//' + baseURL.split('/')[1] + host + '/' + param
+-    } else {
+-      baseURL = location.protocol + '//' + location.hostname + (location.port ? ':' : '') + location.port + baseURL
+-    }
++  var baseURL = util.getRawApiBaseURL()
++  if (!baseURL) {
++    return ''
+   }
+-  if (!baseURL.endsWith('/')) {
+-    baseURL += '/'
++  var param = baseURL.split('/')[3] || ''
++  if (util.isTenantMode() && (!param || baseURL.startsWith('/'))) {
++    baseURL = buildTenantBaseURL(baseURL, param)
+   }
+-  return baseURL
++  return ensureTrailingSlash(baseURL)
+ }
+ 
+ util.baseFileURL = function () {
+@@ -68,37 +140,111 @@ util.baseFileURL = function () {
+   }
+   return util.baseURL()
+ }
++
+ util.wsBaseURL = function () {
+-  var baseURL = process.env.VUE_APP_API
+-  var param = baseURL.split('/')[3] || ''
+-  if (window.pluginsAll && window.pluginsAll.indexOf('dvadmin-tenants-web') !== -1 && (!param || baseURL.startsWith('/'))) {
+-    // 1.把127.0.0.1 替换成和前端一样域名
+-    // 2.把 ip 地址替换成和前端一样域名
+-    // 3.把 /api 或其他类似的替换成和前端一样域名
+-    // document.domain
+-    var host = baseURL.split('/')[2]
+-    if (host) {
+-      var prot = baseURL.split(':')[2] || 80
+-      if (prot === 80 || prot === 443) {
+-        host = document.domain
+-      } else {
+-        host = document.domain + ':' + prot
+-      }
+-      baseURL = baseURL.split('/')[0] + '//' + baseURL.split('/')[1] + host + '/' + param
+-    } else {
+-      baseURL = location.protocol + '//' + location.hostname + (location.port ? ':' : '') + location.port + baseURL
++  return buildWsURLFromApiBase(util.baseURL())
++}
++
++util.buildApiURL = function (path = '') {
++  return buildApiTargetURL(path)
++}
++
++util.buildUploadURL = function () {
++  return util.buildApiURL('api/system/file/')
++}
++
++util.buildUeditorServerURL = function () {
++  return util.buildApiURL('api/system/file/ueditor/')
++}
++
++util.createUeditorConfig = function () {
++  const token = util.cookies.get('token')
++  const fileBaseURL = util.baseFileURL()
++  const headers = token ? { Authorization: 'JWT ' + token } : {}
++  return {
++    serverUrl: util.buildUeditorServerURL(),
++    headers,
++    imageUrlPrefix: fileBaseURL,
++    scrawlUrlPrefix: fileBaseURL,
++    snapscreenUrlPrefix: fileBaseURL,
++    catcherUrlPrefix: fileBaseURL,
++    videoUrlPrefix: fileBaseURL,
++    fileUrlPrefix: fileBaseURL,
++    imageManagerUrlPrefix: fileBaseURL,
++    fileManagerUrlPrefix: fileBaseURL
++  }
++}
++
++util.inspectRuntimeConfig = function () {
++  const rawApiBaseURL = util.getRawApiBaseURL()
++  const snapshot = getRuntimeConfigSnapshot()
++  const errors = []
++
++  if (!rawApiBaseURL) {
++    errors.push({ field: 'VUE_APP_API', message: '不能为空，请配置接口基础地址' })
++  } else {
++    if (rawApiBaseURL.indexOf('\\') !== -1) {
++      errors.push({ field: 'VUE_APP_API', message: '不能包含反斜杠，请使用标准 URL 或以 / 开头的相对路径' })
++    }
++    if (/^https?:\/[^/]/i.test(rawApiBaseURL)) {
++      errors.push({ field: 'VUE_APP_API', message: '协议后缺少一个斜杠，应为 http:// 或 https://' })
+     }
+-  } else if (param !== '' || baseURL.startsWith('/')) {
+-    baseURL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.hostname + (location.port ? ':' : '') + location.port + baseURL
++    if (/^\/\//.test(rawApiBaseURL)) {
++      errors.push({ field: 'VUE_APP_API', message: '缺少协议前缀，请使用 http://、https:// 或以 / 开头的相对路径' })
++    }
++    if (WS_URL_REGEXP.test(rawApiBaseURL)) {
++      errors.push({ field: 'VUE_APP_API', message: '当前值看起来是 WebSocket 地址，请改为 http:// 或 https:// 接口地址' })
++    }
++    if (!rawApiBaseURL.startsWith('/') && !HTTP_URL_REGEXP.test(rawApiBaseURL)) {
++      errors.push({ field: 'VUE_APP_API', message: '应配置为 http(s):// 开头的绝对地址，或以 / 开头的相对路径' })
++    }
++  }
++
++  if (rawApiBaseURL && !snapshot.apiBaseURL) {
++    errors.push({ field: 'API 地址', message: '无法根据当前配置生成可用的接口基础地址' })
++  }
++  if (rawApiBaseURL && !snapshot.wsBaseURL) {
++    errors.push({ field: 'WebSocket 地址', message: '无法根据当前接口地址推导出可用的 WebSocket 地址' })
++  }
++  if (rawApiBaseURL && !snapshot.uploadURL) {
++    errors.push({ field: '文件上传地址', message: '无法根据当前接口地址生成上传地址' })
++  }
++  if (rawApiBaseURL && !snapshot.ueditorServerURL) {
++    errors.push({ field: '富文本上传地址', message: '无法根据当前接口地址生成富文本上传地址' })
++  }
++
++  return {
++    rawApiBaseURL,
++    errors,
++    ...snapshot
+   }
+-  if (!baseURL.endsWith('/')) {
+-    baseURL += '/'
++}
++
++util.ensureRuntimeConfig = function () {
++  const configResult = util.inspectRuntimeConfig()
++  if (!configResult.errors.length || process.env.NODE_ENV !== 'development') {
++    return configResult
+   }
+-  if (baseURL.startsWith('http')) { // https 也默认会被替换成 wss
+-    baseURL = baseURL.replace('http', 'ws')
++
++  const lines = [
++    '前端环境配置校验失败：',
++    ...configResult.errors.map(item => `${item.field}：${item.message}`),
++    `VUE_APP_API：${configResult.rawApiBaseURL || '(空)'}`,
++    `API 地址：${configResult.apiBaseURL || '(空)'}`,
++    `WebSocket 地址：${configResult.wsBaseURL || '(空)'}`,
++    `文件上传地址：${configResult.uploadURL || '(空)'}`,
++    `富文本上传地址：${configResult.ueditorServerURL || '(空)'}`
++  ]
++  const errorMessage = lines.join('\n')
++
++  if (typeof window !== 'undefined' && !window[DEV_CONFIG_ERROR_FLAG]) {
++    window[DEV_CONFIG_ERROR_FLAG] = true
++    console.error(errorMessage)
+   }
+-  return baseURL
++
++  throw new Error(errorMessage)
+ }
++
+ /**
+  * 自动生成ID
+  */
+@@ -163,7 +309,6 @@ util.ArrayToTree = function (rootList, parentValue, parentName, list) {
+   }
+ 
+   for (const i of list) {
+-    // 如果子元素里面存在children就直接递归，不存在就生成一个children
+     if (i.children) {
+       util.ArrayToTree(rootList, i.id, i.name, i.children)
+     } else {
+@@ -177,7 +322,7 @@ util.ArrayToTree = function (rootList, parentValue, parentName, list) {
+   }
+   return list
+ }
+-// 格式化字节大小
++
+ util.formatBytes = function (bytes, decimals = 2) {
+   if (isNaN(bytes)) {
+     return bytes
+diff --git a/web/src/main.js b/web/src/main.js
+index 4b6f2eee..a6aaa9d5 100644
+--- a/web/src/main.js
++++ b/web/src/main.js
+@@ -49,6 +49,7 @@ Vue.prototype.$md5 = md5
+ Vue.prototype.$util = util
+ Vue.prototype.$websocket = websocket
+ Vue.prototype.$echarts = echarts
++util.ensureRuntimeConfig()
+ new Vue({
+   router,
+   store,

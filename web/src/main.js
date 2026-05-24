@@ -49,6 +49,7 @@ Vue.prototype.$md5 = md5
 Vue.prototype.$util = util
 Vue.prototype.$websocket = websocket
 Vue.prototype.$echarts = echarts
+util.ensureRuntimeConfig()
 new Vue({
   router,
   store,
