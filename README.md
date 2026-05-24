@@ -117,6 +117,27 @@ github：[https://github.com/liqianglog/django-vue-admin](https://github.com/liq
 | dvadmin-low-code-crud 低代码生成                             | Development        | Low-code generation plugin                                   |
 | dvadmin-flow 工作流插件                                      | Development        | Workflow plugin                                              |
 
+## Pre-commit Code Quality Check
+
+To maintain code quality and prevent common errors from entering the main branch, this project provides a lightweight pre-commit quality check script `check.py`.
+Developers are encouraged to run this script before committing code. It automatically checks basic syntax and build status for both frontend and backend.
+
+**How to run:**
+
+In the project root directory, run the following command:
+
+```bash
+python check.py
+# or
+python3 check.py
+```
+
+**Check Scope:**
+1. **Frontend**: Executes `npm run lint` to check code style, and `npm run test` (which runs `vue-cli-service build --mode test`) to verify if the project builds successfully.
+2. **Backend**: Executes `python manage.py check` to quickly check for basic syntax, configuration, and import errors in the Django project.
+
+If the check fails, the script will clearly indicate whether the issue is in the frontend or backend. Please fix the reported errors before committing.
+
 ## before start project you need:
 
 ~~~

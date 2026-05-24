@@ -1,0 +1,64 @@
+diff --git a/README.md b/README.md
+index af839cee..3961d9c2 100644
+--- a/README.md
++++ b/README.md
+@@ -117,6 +117,27 @@ github：[https://github.com/liqianglog/django-vue-admin](https://github.com/liq
+ | dvadmin-low-code-crud 低代码生成                             | Development        | Low-code generation plugin                                   |
+ | dvadmin-flow 工作流插件                                      | Development        | Workflow plugin                                              |
+ 
++## Pre-commit Code Quality Check
++
++To maintain code quality and prevent common errors from entering the main branch, this project provides a lightweight pre-commit quality check script `check.py`.
++Developers are encouraged to run this script before committing code. It automatically checks basic syntax and build status for both frontend and backend.
++
++**How to run:**
++
++In the project root directory, run the following command:
++
++```bash
++python check.py
++# or
++python3 check.py
++```
++
++**Check Scope:**
++1. **Frontend**: Executes `npm run lint` to check code style, and `npm run test` (which runs `vue-cli-service build --mode test`) to verify if the project builds successfully.
++2. **Backend**: Executes `python manage.py check` to quickly check for basic syntax, configuration, and import errors in the Django project.
++
++If the check fails, the script will clearly indicate whether the issue is in the frontend or backend. Please fix the reported errors before committing.
++
+ ## before start project you need:
+ 
+ ~~~
+diff --git a/README.zh.md b/README.zh.md
+index 2df480da..15c06a72 100644
+--- a/README.zh.md
++++ b/README.zh.md
+@@ -118,6 +118,27 @@ github地址：[https://github.com/liqianglog/django-vue-admin](https://github.c
+ 
+ 
+ 
++## 代码质量检查
++
++为了保证代码质量，减少低级错误进入主分支，本项目提供了一个轻量级的提交前质量检查脚本 `check.py`。
++开发者在提交代码前，建议运行该脚本，它可以自动检查前端和后端的基本语法及构建情况。
++
++**执行方法：**
++
++在项目根目录下，直接运行以下命令即可：
++
++```bash
++python check.py
++# 或者
++python3 check.py
++```
++
++**检查范围包括：**
++1. **前端**：执行 `npm run lint` 检查代码规范，并执行 `npm run test`（即 `vue-cli-service build --mode test`）验证是否能成功构建。
++2. **后端**：执行 `python manage.py check`，快速检查 Django 项目的基础语法、配置和导入错误。
++
++检查脚本执行失败时，会明确提示是前端还是后端未通过，请根据报错信息修复后再进行提交。
++
+ ## 准备工作
+ 
+ ~~~

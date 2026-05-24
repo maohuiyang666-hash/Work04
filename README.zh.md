@@ -118,6 +118,27 @@ github地址：[https://github.com/liqianglog/django-vue-admin](https://github.c
 
 
 
+## 代码质量检查
+
+为了保证代码质量，减少低级错误进入主分支，本项目提供了一个轻量级的提交前质量检查脚本 `check.py`。
+开发者在提交代码前，建议运行该脚本，它可以自动检查前端和后端的基本语法及构建情况。
+
+**执行方法：**
+
+在项目根目录下，直接运行以下命令即可：
+
+```bash
+python check.py
+# 或者
+python3 check.py
+```
+
+**检查范围包括：**
+1. **前端**：执行 `npm run lint` 检查代码规范，并执行 `npm run test`（即 `vue-cli-service build --mode test`）验证是否能成功构建。
+2. **后端**：执行 `python manage.py check`，快速检查 Django 项目的基础语法、配置和导入错误。
+
+检查脚本执行失败时，会明确提示是前端还是后端未通过，请根据报错信息修复后再进行提交。
+
 ## 准备工作
 
 ~~~
