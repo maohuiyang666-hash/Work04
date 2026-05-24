@@ -104,6 +104,15 @@ const errorPage = [{
   path: '/404',
   name: '404',
   component: _import('system/error/404')
+}, {
+  path: '/menuConfigError',
+  name: 'menuConfigError',
+  hidden: true,
+  meta: {
+    auth: false,
+    cache: false
+  },
+  component: _import('system/error/menuConfigError/index')
 }]
 
 // 导出需要显示菜单的

@@ -381,7 +381,8 @@ export default {
           if (route.children && route.children.length > 0) {
             push(route.children)
           } else {
-            if (!route.hidden) {
+            // 过滤隐藏路由和异常菜单路由，不加入标签页候选池
+            if (!route.hidden && !route.meta.menuError) {
               const { meta, name, path } = route
               pool.push({ meta, name, path })
             }

@@ -29,6 +29,27 @@ const router = new VueRouter({
 })
 
 /**
+ * 全局异步组件加载错误处理
+ * 用于捕获生产模式下动态 import() 失败的场景
+ */
+router.onError((error) => {
+  console.error('[路由错误] 动态组件加载失败:', error)
+  // 尝试从错误信息中提取组件路径
+  const importMatch = error.message && error.message.match(/import\(.*['"](.*)['"]/)
+  const componentPath = importMatch ? importMatch[1] : ''
+  // 防止错误循环重定向
+  if (router.currentRoute.name === 'menuConfigError') return
+  router.replace({
+    name: 'menuConfigError',
+    query: {
+      menuName: '未知菜单',
+      componentPath: componentPath || '未知',
+      errorMessage: error.message || '组件动态导入失败'
+    }
+  }).catch(() => {})
+})
+
+/**
  * 路由拦截
  * 权限验证
  */

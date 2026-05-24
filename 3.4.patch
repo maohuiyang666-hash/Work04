@@ -1,0 +1,315 @@
+diff --git a/web/src/layout/header-aside/components/libs/util.menu.js b/web/src/layout/header-aside/components/libs/util.menu.js
+index c403492e..07851376 100644
+--- a/web/src/layout/header-aside/components/libs/util.menu.js
++++ b/web/src/layout/header-aside/components/libs/util.menu.js
+@@ -8,11 +8,14 @@ export function elMenuItem (h, menu) {
+   if (menu.icon) icon = <i class={ `fa fa-${menu.icon}` }/>
+   else if (menu.iconSvg) icon = <d2-icon-svg name={ menu.iconSvg }/>
+   else icon = <i class="fa fa-file-o"/>
++  const title = menu.title || '未命名菜单'
+   return <el-menu-item
+     key={ menu.path }
+     index={ menu.path }>
+     { icon }
+-    <span slot="title">{ menu.title || '未命名菜单' }</span>
++    <span slot="title" class={ menu._error ? 'menu-error-item' : '' }>
++      { menu._error ? (<span><i class="el-icon-warning" style="color:#e6a23c;margin-right:4px;"/>{title}</span>) : title }
++    </span>
+   </el-menu-item>
+ }
+ 
+@@ -26,11 +29,12 @@ export function elSubmenu (h, menu) {
+   if (menu.icon) icon = <i slot="title" class={ `fa fa-${menu.icon}` }/>
+   else if (menu.iconSvg) icon = <d2-icon-svg slot="title" name={ menu.iconSvg }/>
+   else icon = <i slot="title" class="fa fa-folder-o"/>
++  const title = menu.title || '未命名菜单'
+   return <el-submenu
+     key={ menu.path }
+     index={ menu.path }>
+     { icon }
+-    <span slot="title">{ menu.title || '未命名菜单' }</span>
++    <span slot="title">{ title }</span>
+     { menu.children.map(child => createMenu.call(this, h, child)) }
+   </el-submenu>
+ }
+diff --git a/web/src/layout/header-aside/components/mixin/menu.js b/web/src/layout/header-aside/components/mixin/menu.js
+index 7160b58f..611d6137 100644
+--- a/web/src/layout/header-aside/components/mixin/menu.js
++++ b/web/src/layout/header-aside/components/mixin/menu.js
+@@ -8,6 +8,27 @@ export default {
+       } else if (/^https:\/\/|http:\/\//.test(index)) {
+         util.open(index)
+       } else {
++        // 查找当前点击的菜单项，判断是否为异常菜单
++        const findMenuByPath = (menuList, path) => {
++          for (const m of menuList) {
++            if (m.path === path) return m
++            if (m.children) {
++              const found = findMenuByPath(m.children, path)
++              if (found) return found
++            }
++          }
++          return null
++        }
++        const asideMenu = this.$store.state.d2admin.menu.aside
++        const targetMenu = findMenuByPath(asideMenu, index)
++        if (targetMenu && targetMenu._error) {
++          this.$notify({
++            title: '菜单配置异常',
++            message: targetMenu._errorMessage || '该菜单的组件路径配置有误，请检查后端菜单配置',
++            type: 'warning',
++            duration: 6000
++          })
++        }
+         this.$router.push({
+           path: index
+         })
+diff --git a/web/src/menu/index.js b/web/src/menu/index.js
+index 422d23f6..397b896c 100644
+--- a/web/src/menu/index.js
++++ b/web/src/menu/index.js
+@@ -37,50 +37,129 @@ export const getMenu = function () {
+   })
+ }
+ 
++/**
++ * 生成异常菜单的统一错误信息
++ */
++function buildMenuErrorMessage (item, err) {
++  const menuLabel = item.name || item.title || '未命名菜单'
++  const compPath = item.component || '未配置'
++  let reason = ''
++  if (err) {
++    reason = err.message || err.toString()
++  } else if (!item.component) {
++    reason = '组件路径（component）字段为空'
++  } else if (!item.path) {
++    reason = '路由路径（path）字段为空'
++  } else {
++    reason = '组件文件不存在或无法加载'
++  }
++  return `菜单「${menuLabel}」配置异常：组件路径 "${compPath}" 无法正确加载。原因：${reason}`
++}
++
+ /**
+  * 校验路由是否有效
++ * 验证失败时标记 _error 字段，不整体过滤异常菜单
+  */
+ export const checkRouter = function (menuData) {
+   const result = []
+   for (const item of menuData) {
++    // 跳过不需要组件的外链菜单
++    if (item.is_link === 1 || item.frame_out) {
++      result.push(item)
++      continue
++    }
++    // 检查基本字段完整性
++    if (!item.path || !item.component) {
++      console.error(`[菜单配置错误] ${buildMenuErrorMessage(item)}`)
++      result.push({
++        ...item,
++        _error: true,
++        _errorMessage: buildMenuErrorMessage(item)
++      })
++      continue
++    }
++    // 尝试同步加载验证组件（开发模式下有效，生产模式下 _import 返回懒加载函数不抛异常）
+     try {
+-      if (item.path !== '' && item.component) {
+-        (item.component && item.component.substr(0, 8) === 'plugins/') ? pluginImport(item.component.replace('plugins/', '')) : _import(item.component)
++      if (item.component.substr(0, 8) === 'plugins/') {
++        pluginImport(item.component.replace('plugins/', ''))
++      } else {
++        _import(item.component)
+       }
+       result.push(item)
+     } catch (err) {
+-      console.log(`导入菜单错误，会导致页面无法访问，请检查文件是否存在：${item.component}`)
++      console.error(`[菜单配置错误] ${buildMenuErrorMessage(item, err)}`)
++      result.push({
++        ...item,
++        _error: true,
++        _errorMessage: buildMenuErrorMessage(item, err)
++      })
+     }
+   }
+   return result
+ }
++
+ /**
+  * 将获取到的后端菜单数据,解析为前端路由
++ * 每个菜单项独立处理，单个异常不影响其他菜单路由注册
+  */
+ export const handleRouter = function (menuData) {
+   const result = []
++  // 预设错误展示组件
++  let errorComponent = null
++  try {
++    errorComponent = _import('system/error/menuConfigError/index')
++  } catch (e) {
++    errorComponent = { render: h => h('div') }
++  }
++
+   for (const item of menuData) {
+-    if (item.path !== '' && item.component) {
+-      const obj = {
+-        path: item.path,
+-        name: item.component_name,
+-        component: (item.component && item.component.substr(0, 8) === 'plugins/') ? pluginImport(item.component.replace('plugins/', '')) : _import(item.component),
+-        meta: {
+-          title: item.name,
+-          auth: true,
+-          cache: item.cache,
+-          openInNewWindow: item.frame_out
++    // 外链菜单不生成路由
++    if (item.is_link === 1) {
++      continue
++    }
++    try {
++      if (item.path !== '' && item.component) {
++        let component
++        if (item._error) {
++          component = errorComponent
++        } else {
++          const isPlugin = item.component.substr(0, 8) === 'plugins/'
++          try {
++            component = isPlugin
++              ? pluginImport(item.component.replace('plugins/', ''))
++              : _import(item.component)
++          } catch (err) {
++            console.error(`[菜单配置错误] 路由注册失败，菜单「${item.name || '未命名'}」组件 "${item.component}" 加载异常`, err)
++            component = errorComponent
++          }
++        }
++        const obj = {
++          path: item.path,
++          name: item.component_name,
++          component: component,
++          meta: {
++            title: item.name,
++            auth: true,
++            cache: item._error ? false : item.cache,
++            openInNewWindow: item.frame_out,
++            menuError: item._error || false,
++            menuErrorMessage: item._errorMessage || '',
++            menuComponentPath: item.component || ''
++          }
++        }
++        if (item.frame_out) {
++          frameOutRoutes.push(obj)
++        } else {
++          result.push(obj)
+         }
+-      }
+-      if (item.frame_out) {
+-        frameOutRoutes.push(obj)
+       } else {
+-        result.push(obj)
+-      }
+-    } else {
+-      if (item.is_link === 0) {
+-        delete item.path
++        if (item.is_link === 0) {
++          delete item.path
++        }
+       }
++    } catch (err) {
++      // 单个菜单项处理失败，记录日志但不影响其他菜单
++      console.error(`[菜单配置错误] 处理菜单「${item.name || '未命名'}」时发生异常，该菜单将不可用`, err)
+     }
+   }
+   frameInRoutes[0].children = [...result]
+@@ -89,6 +168,7 @@ export const handleRouter = function (menuData) {
+ 
+ /**
+  * 将前端的侧边菜单进行处理
++ * 异常菜单保留在侧边栏中，但标记 error 以便视觉区分
+  */
+ export const handleAsideMenu = function (menuData) {
+   // 将列表数据转换为树形数据
+@@ -101,4 +181,4 @@ export const handleAsideMenu = function (menuData) {
+     ...data
+   ]
+   return supplementPath(menu)
+-}
++}
+\ No newline at end of file
+diff --git a/web/src/router/index.js b/web/src/router/index.js
+index 83fdc2f1..1094dce5 100644
+--- a/web/src/router/index.js
++++ b/web/src/router/index.js
+@@ -28,6 +28,27 @@ const router = new VueRouter({
+   routes
+ })
+ 
++/**
++ * 全局异步组件加载错误处理
++ * 用于捕获生产模式下动态 import() 失败的场景
++ */
++router.onError((error) => {
++  console.error('[路由错误] 动态组件加载失败:', error)
++  // 尝试从错误信息中提取组件路径
++  const importMatch = error.message && error.message.match(/import\(.*['"](.*)['"]/)
++  const componentPath = importMatch ? importMatch[1] : ''
++  // 防止错误循环重定向
++  if (router.currentRoute.name === 'menuConfigError') return
++  router.replace({
++    name: 'menuConfigError',
++    query: {
++      menuName: '未知菜单',
++      componentPath: componentPath || '未知',
++      errorMessage: error.message || '组件动态导入失败'
++    }
++  }).catch(() => {})
++})
++
+ /**
+  * 路由拦截
+  * 权限验证
+diff --git a/web/src/router/routes.js b/web/src/router/routes.js
+index e438688a..98694718 100644
+--- a/web/src/router/routes.js
++++ b/web/src/router/routes.js
+@@ -104,6 +104,15 @@ const errorPage = [{
+   path: '/404',
+   name: '404',
+   component: _import('system/error/404')
++}, {
++  path: '/menuConfigError',
++  name: 'menuConfigError',
++  hidden: true,
++  meta: {
++    auth: false,
++    cache: false
++  },
++  component: _import('system/error/menuConfigError/index')
+ }]
+ 
+ // 导出需要显示菜单的
+diff --git a/web/src/store/modules/d2admin/modules/page.js b/web/src/store/modules/d2admin/modules/page.js
+index 2d81cde1..0f4b4bc3 100644
+--- a/web/src/store/modules/d2admin/modules/page.js
++++ b/web/src/store/modules/d2admin/modules/page.js
+@@ -381,7 +381,8 @@ export default {
+           if (route.children && route.children.length > 0) {
+             push(route.children)
+           } else {
+-            if (!route.hidden) {
++            // 过滤隐藏路由和异常菜单路由，不加入标签页候选池
++            if (!route.hidden && !route.meta.menuError) {
+               const { meta, name, path } = route
+               pool.push({ meta, name, path })
+             }
+diff --git a/web/src/store/modules/d2admin/modules/search.js b/web/src/store/modules/d2admin/modules/search.js
+index 04e4280d..67251026 100644
+--- a/web/src/store/modules/d2admin/modules/search.js
++++ b/web/src/store/modules/d2admin/modules/search.js
+@@ -41,6 +41,8 @@ export default {
+           if (m.children) {
+             push(m.children, [...titlePrefix, m.title])
+           } else {
++            // 过滤异常菜单，不加入搜索池
++            if (m._error) return
+             pool.push({
+               ...m,
+               fullTitle: [...titlePrefix, m.title].join(' / ')

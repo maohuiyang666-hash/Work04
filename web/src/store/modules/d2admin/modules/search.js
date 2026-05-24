@@ -41,6 +41,8 @@ export default {
           if (m.children) {
             push(m.children, [...titlePrefix, m.title])
           } else {
+            // 过滤异常菜单，不加入搜索池
+            if (m._error) return
             pool.push({
               ...m,
               fullTitle: [...titlePrefix, m.title].join(' / ')
