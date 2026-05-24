@@ -1,0 +1,15 @@
+{
+  "name": "django-vue-admin",
+  "version": "2.1.5",
+  "description": "轻量级代码质量门禁方案 - django-vue-admin 项目",
+  "scripts": {
+    "check": "npm run check:frontend && npm run check:backend",
+    "check:frontend": "cd web && node check_quality.js",
+    "check:backend": "cd backend && python3 check_quality.py",
+    "check:frontend-only": "cd web && node check_quality.js",
+    "check:backend-only": "cd backend && python3 check_quality.py"
+  },
+  "keywords": ["django", "vue", "code-quality"],
+  "author": "",
+  "license": "MIT"
+}
