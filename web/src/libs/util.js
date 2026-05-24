@@ -3,6 +3,13 @@ import db from './util.db'
 import log from './util.log'
 import dayjs from 'dayjs'
 import filterParams from './util.params'
+import {
+  buildBaseURL,
+  buildWsBaseURL,
+  buildFileURL,
+  buildUploadURL,
+  validateOnStartup
+} from './util.config'
 const util = {
   cookies,
   db,
@@ -33,71 +40,42 @@ util.open = function (url) {
   document.body.removeChild(document.getElementById('d2admin-link-temp'))
 }
 /**
- * @description 校验是否为租户模式。租户模式把域名替换成 域名 加端口
+ * @description 校验是否为租户模式并构建 API 基地址
+ *   租户模式下将域名替换为当前浏览器域名 + 端口
+ *   统一由 util.config.js 的 buildBaseURL 实现，消除重复拼接差异
  */
 util.baseURL = function () {
-  var baseURL = process.env.VUE_APP_API
-  var param = baseURL.split('/')[3] || ''
-  if (window.pluginsAll && window.pluginsAll.indexOf('dvadmin-tenants-web') !== -1 && (!param || baseURL.startsWith('/'))) {
-    // 1.把127.0.0.1 替换成和前端一样域名
-    // 2.把 ip 地址替换成和前端一样域名
-    // 3.把 /api 或其他类似的替换成和前端一样域名
-    // document.domain
-    var host = baseURL.split('/')[2]
-    if (host) {
-      var prot = baseURL.split(':')[2] || 80
-      if (prot === 80 || prot === 443) {
-        host = document.domain
-      } else {
-        host = document.domain + ':' + prot
-      }
-      baseURL = baseURL.split('/')[0] + '//' + baseURL.split('/')[1] + host + '/' + param
-    } else {
-      baseURL = location.protocol + '//' + location.hostname + (location.port ? ':' : '') + location.port + baseURL
-    }
-  }
-  if (!baseURL.endsWith('/')) {
-    baseURL += '/'
-  }
-  return baseURL
+  return buildBaseURL()
 }
 
+/**
+ * @description 构建文件上传基地址
+ *   oss/cos 云存储模式返回空字符串，否则沿用 API 基地址
+ */
 util.baseFileURL = function () {
-  if (process.env.VUE_APP_FILE_ENGINE && (process.env.VUE_APP_FILE_ENGINE === 'oss' || process.env.VUE_APP_FILE_ENGINE === 'cos')) {
-    return ''
-  }
-  return util.baseURL()
+  return buildFileURL()
 }
+/**
+ * @description 构建 WebSocket 基地址
+ *   自动处理 http→ws / https→wss 协议转换
+ *   租户模式下先做域名替换再转换协议
+ *   统一由 util.config.js 的 buildWsBaseURL 实现
+ */
 util.wsBaseURL = function () {
-  var baseURL = process.env.VUE_APP_API
-  var param = baseURL.split('/')[3] || ''
-  if (window.pluginsAll && window.pluginsAll.indexOf('dvadmin-tenants-web') !== -1 && (!param || baseURL.startsWith('/'))) {
-    // 1.把127.0.0.1 替换成和前端一样域名
-    // 2.把 ip 地址替换成和前端一样域名
-    // 3.把 /api 或其他类似的替换成和前端一样域名
-    // document.domain
-    var host = baseURL.split('/')[2]
-    if (host) {
-      var prot = baseURL.split(':')[2] || 80
-      if (prot === 80 || prot === 443) {
-        host = document.domain
-      } else {
-        host = document.domain + ':' + prot
-      }
-      baseURL = baseURL.split('/')[0] + '//' + baseURL.split('/')[1] + host + '/' + param
-    } else {
-      baseURL = location.protocol + '//' + location.hostname + (location.port ? ':' : '') + location.port + baseURL
-    }
-  } else if (param !== '' || baseURL.startsWith('/')) {
-    baseURL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.hostname + (location.port ? ':' : '') + location.port + baseURL
-  }
-  if (!baseURL.endsWith('/')) {
-    baseURL += '/'
-  }
-  if (baseURL.startsWith('http')) { // https 也默认会被替换成 wss
-    baseURL = baseURL.replace('http', 'ws')
-  }
-  return baseURL
+  return buildWsBaseURL()
+}
+/**
+ * @description 构建文件上传完整地址（基地址 + 文件上传接口路径）
+ * @param {string} [uploadPath='api/system/file/'] 文件上传接口路径
+ */
+util.uploadURL = function (uploadPath) {
+  return buildUploadURL(uploadPath)
+}
+/**
+ * @description 启动时环境变量校验，仅在开发环境生效
+ */
+util.validateOnStartup = function () {
+  return validateOnStartup()
 }
 /**
  * 自动生成ID

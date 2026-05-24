@@ -35,6 +35,9 @@ import md5 from 'js-md5'
 // websocket
 import websocket from '@/api/websocket'
 import util from '@/libs/util'
+
+// 应用启动时校验环境变量配置（仅在开发环境输出提示，生产环境静默跳过）
+util.validateOnStartup()
 import VueCoreVideoPlayer from 'vue-core-video-player'
 // 引入echarts
 import * as echarts from 'echarts' // 注册echarts组件
