@@ -5,14 +5,22 @@
  */
 export function elMenuItem (h, menu) {
   let icon = null
+  const isError = menu._error
   if (menu.icon) icon = <i class={ `fa fa-${menu.icon}` }/>
   else if (menu.iconSvg) icon = <d2-icon-svg name={ menu.iconSvg }/>
   else icon = <i class="fa fa-file-o"/>
+  
+  const titleContent = isError ? [
+    <span style="color: #f56c6c; margin-right: 4px;">{ menu.title || '未命名菜单' }</span>,
+    <i class="fa fa-exclamation-triangle" style="color: #f56c6c; font-size: 12px;"></i>
+  ] : <span>{ menu.title || '未命名菜单' }</span>
+  
   return <el-menu-item
     key={ menu.path }
-    index={ menu.path }>
+    index={ menu.path }
+    class={ isError ? 'menu-item-error' : '' }>
     { icon }
-    <span slot="title">{ menu.title || '未命名菜单' }</span>
+    <span slot="title">{ titleContent }</span>
   </el-menu-item>
 }
 

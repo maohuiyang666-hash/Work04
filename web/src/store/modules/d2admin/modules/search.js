@@ -41,6 +41,8 @@ export default {
           if (m.children) {
             push(m.children, [...titlePrefix, m.title])
           } else {
+            // 标记错误菜单，但仍然保留在搜索结果中
+            // 让用户可以找到，但在显示时给出标记
             pool.push({
               ...m,
               fullTitle: [...titlePrefix, m.title].join(' / ')

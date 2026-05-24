@@ -1,5 +1,5 @@
 <template>
-  <div class="d2-panel-search-item" :class="hoverMode ? 'can-hover' : ''" flex>
+  <div class="d2-panel-search-item" :class="[hoverMode ? 'can-hover' : '', { 'is-error': item._error }]" flex>
     <div class="d2-panel-search-item__icon" flex-box="0">
       <div class="d2-panel-search-item__icon-box" flex="main:center cross:center">
         <d2-icon v-if="item.icon" :name="item.icon"/>
@@ -9,7 +9,12 @@
     </div>
     <div class="d2-panel-search-item__info" flex-box="1" flex="dir:top">
       <div class="d2-panel-search-item__info-title" flex-box="1" flex="cross:center">
-        <span>{{item.title}}</span>
+        <span v-if="item._error" style="color: #f56c6c;">
+          <i class="fa fa-exclamation-triangle" style="margin-right: 4px;"></i>
+          {{item.title}}
+          <el-tag size="mini" type="danger" style="margin-left: 8px;">配置错误</el-tag>
+        </span>
+        <span v-else>{{item.title}}</span>
       </div>
       <div class="d2-panel-search-item__info-fullTitle" flex-box="0">
         <span>{{item.fullTitle}}</span>
@@ -63,6 +68,9 @@ export default {
         }
       }
     }
+  }
+  &.is-error {
+    background-color: #fef0f0;
   }
   .d2-panel-search-item__icon {
     width: 64px;

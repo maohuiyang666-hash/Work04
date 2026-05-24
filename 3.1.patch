@@ -1,0 +1,243 @@
+diff --git a/web/src/layout/header-aside/components/libs/util.menu.js b/web/src/layout/header-aside/components/libs/util.menu.js
+index c403492e..ca58dba5 100644
+--- a/web/src/layout/header-aside/components/libs/util.menu.js
++++ b/web/src/layout/header-aside/components/libs/util.menu.js
+@@ -5,14 +5,22 @@
+  */
+ export function elMenuItem (h, menu) {
+   let icon = null
++  const isError = menu._error
+   if (menu.icon) icon = <i class={ `fa fa-${menu.icon}` }/>
+   else if (menu.iconSvg) icon = <d2-icon-svg name={ menu.iconSvg }/>
+   else icon = <i class="fa fa-file-o"/>
++  
++  const titleContent = isError ? [
++    <span style="color: #f56c6c; margin-right: 4px;">{ menu.title || '未命名菜单' }</span>,
++    <i class="fa fa-exclamation-triangle" style="color: #f56c6c; font-size: 12px;"></i>
++  ] : <span>{ menu.title || '未命名菜单' }</span>
++  
+   return <el-menu-item
+     key={ menu.path }
+-    index={ menu.path }>
++    index={ menu.path }
++    class={ isError ? 'menu-item-error' : '' }>
+     { icon }
+-    <span slot="title">{ menu.title || '未命名菜单' }</span>
++    <span slot="title">{ titleContent }</span>
+   </el-menu-item>
+ }
+ 
+diff --git a/web/src/layout/header-aside/components/mixin/menu.js b/web/src/layout/header-aside/components/mixin/menu.js
+index 7160b58f..aeb111a2 100644
+--- a/web/src/layout/header-aside/components/mixin/menu.js
++++ b/web/src/layout/header-aside/components/mixin/menu.js
+@@ -1,13 +1,41 @@
+ import util from '@/libs/util.js'
++import { mapState } from 'vuex'
+ 
+ export default {
++  computed: {
++    ...mapState('d2admin/menu', [
++      'aside'
++    ])
++  },
+   methods: {
++    findMenuItemByPath (menus, path) {
++      for (const menu of menus) {
++        if (menu.path === path) {
++          return menu
++        }
++        if (menu.children && menu.children.length > 0) {
++          const found = this.findMenuItemByPath(menu.children, path)
++          if (found) return found
++        }
++      }
++      return null
++    },
+     handleMenuSelect (index, indexPath) {
+       if (/^d2-menu-empty-\d+$/.test(index) || index === undefined) {
+         this.$message.warning('临时菜单')
+       } else if (/^https:\/\/|http:\/\//.test(index)) {
+         util.open(index)
+       } else {
++        // 查找菜单项，检查是否是错误菜单
++        const menuItem = this.findMenuItemByPath(this.aside, index)
++        if (menuItem && menuItem._error) {
++          this.$message.warning({
++            message: `菜单【${menuItem.title || '未命名菜单'}】配置错误，请检查组件路径`,
++            duration: 5000,
++            showClose: true
++          })
++        }
++        // 无论是否是错误菜单，都允许跳转（会显示错误提示页）
+         this.$router.push({
+           path: index
+         })
+diff --git a/web/src/layout/header-aside/components/panel-search/components/panel-search-item/index.vue b/web/src/layout/header-aside/components/panel-search/components/panel-search-item/index.vue
+index 52124b33..053ab9b1 100644
+--- a/web/src/layout/header-aside/components/panel-search/components/panel-search-item/index.vue
++++ b/web/src/layout/header-aside/components/panel-search/components/panel-search-item/index.vue
+@@ -1,5 +1,5 @@
+ <template>
+-  <div class="d2-panel-search-item" :class="hoverMode ? 'can-hover' : ''" flex>
++  <div class="d2-panel-search-item" :class="[hoverMode ? 'can-hover' : '', { 'is-error': item._error }]" flex>
+     <div class="d2-panel-search-item__icon" flex-box="0">
+       <div class="d2-panel-search-item__icon-box" flex="main:center cross:center">
+         <d2-icon v-if="item.icon" :name="item.icon"/>
+@@ -9,7 +9,12 @@
+     </div>
+     <div class="d2-panel-search-item__info" flex-box="1" flex="dir:top">
+       <div class="d2-panel-search-item__info-title" flex-box="1" flex="cross:center">
+-        <span>{{item.title}}</span>
++        <span v-if="item._error" style="color: #f56c6c;">
++          <i class="fa fa-exclamation-triangle" style="margin-right: 4px;"></i>
++          {{item.title}}
++          <el-tag size="mini" type="danger" style="margin-left: 8px;">配置错误</el-tag>
++        </span>
++        <span v-else>{{item.title}}</span>
+       </div>
+       <div class="d2-panel-search-item__info-fullTitle" flex-box="0">
+         <span>{{item.fullTitle}}</span>
+@@ -64,6 +69,9 @@ export default {
+       }
+     }
+   }
++  &.is-error {
++    background-color: #fef0f0;
++  }
+   .d2-panel-search-item__icon {
+     width: 64px;
+     .d2-panel-search-item__icon-box {
+diff --git a/web/src/menu/index.js b/web/src/menu/index.js
+index 422d23f6..1ba0a44a 100644
+--- a/web/src/menu/index.js
++++ b/web/src/menu/index.js
+@@ -4,6 +4,7 @@ import XEUtils from 'xe-utils'
+ import { frameInRoutes, frameOutRoutes } from '@/router/routes'
+ const _import = require('@/libs/util.import.' + process.env.NODE_ENV)
+ const pluginImport = require('@/libs/util.import.plugin')
++
+ /**
+  * @description 给菜单数据补充上 path 字段
+  * @description https://github.com/d2-projects/d2-admin/issues/209
+@@ -23,6 +24,11 @@ export const menuHeader = supplementPath([])
+ 
+ export const menuAside = supplementPath([])
+ 
++/**
++ * 错误页面组件导入
++ */
++const errorPageComponent = () => import('@/views/system/error/menu-error/index.vue')
++
+ // 请求菜单数据,用于解析路由和侧边栏菜单
+ export const getMenu = function () {
+   return request({
+@@ -38,7 +44,7 @@ export const getMenu = function () {
+ }
+ 
+ /**
+- * 校验路由是否有效
++ * 校验路由是否有效，并标记错误菜单
+  */
+ export const checkRouter = function (menuData) {
+   const result = []
+@@ -47,13 +53,22 @@ export const checkRouter = function (menuData) {
+       if (item.path !== '' && item.component) {
+         (item.component && item.component.substr(0, 8) === 'plugins/') ? pluginImport(item.component.replace('plugins/', '')) : _import(item.component)
+       }
+-      result.push(item)
++      result.push({
++        ...item,
++        _error: false
++      })
+     } catch (err) {
+-      console.log(`导入菜单错误，会导致页面无法访问，请检查文件是否存在：${item.component}`)
++      console.error(`[菜单配置错误] 菜单名称: ${item.name}, 组件路径: ${item.component}, 错误:`, err)
++      result.push({
++        ...item,
++        _error: true,
++        _errorMessage: err.message || '组件导入失败，请检查路径是否正确'
++      })
+     }
+   }
+   return result
+ }
++
+ /**
+  * 将获取到的后端菜单数据,解析为前端路由
+  */
+@@ -61,21 +76,41 @@ export const handleRouter = function (menuData) {
+   const result = []
+   for (const item of menuData) {
+     if (item.path !== '' && item.component) {
+-      const obj = {
+-        path: item.path,
+-        name: item.component_name,
+-        component: (item.component && item.component.substr(0, 8) === 'plugins/') ? pluginImport(item.component.replace('plugins/', '')) : _import(item.component),
+-        meta: {
+-          title: item.name,
+-          auth: true,
+-          cache: item.cache,
+-          openInNewWindow: item.frame_out
++      let routeObj
++      if (item._error) {
++        // 错误菜单指向错误提示页面
++        routeObj = {
++          path: item.path,
++          name: item.component_name || `menu-error-${item.id}`,
++          component: errorPageComponent,
++          meta: {
++            title: item.name,
++            auth: true,
++            cache: false,
++            openInNewWindow: item.frame_out,
++            menuName: item.name,
++            componentPath: item.component,
++            errorMessage: item._errorMessage
++          }
++        }
++      } else {
++        // 正常菜单正常处理
++        routeObj = {
++          path: item.path,
++          name: item.component_name,
++          component: (item.component && item.component.substr(0, 8) === 'plugins/') ? pluginImport(item.component.replace('plugins/', '')) : _import(item.component),
++          meta: {
++            title: item.name,
++            auth: true,
++            cache: item.cache,
++            openInNewWindow: item.frame_out
++          }
+         }
+       }
+       if (item.frame_out) {
+-        frameOutRoutes.push(obj)
++        frameOutRoutes.push(routeObj)
+       } else {
+-        result.push(obj)
++        result.push(routeObj)
+       }
+     } else {
+       if (item.is_link === 0) {
+@@ -88,7 +123,7 @@ export const handleRouter = function (menuData) {
+ }
+ 
+ /**
+- * 将前端的侧边菜单进行处理
++ * 将前端的侧边菜单进行处理，为错误菜单添加标记
+  */
+ export const handleAsideMenu = function (menuData) {
+   // 将列表数据转换为树形数据
+diff --git a/web/src/store/modules/d2admin/modules/search.js b/web/src/store/modules/d2admin/modules/search.js
+index 04e4280d..1ec60af1 100644
+--- a/web/src/store/modules/d2admin/modules/search.js
++++ b/web/src/store/modules/d2admin/modules/search.js
+@@ -41,6 +41,8 @@ export default {
+           if (m.children) {
+             push(m.children, [...titlePrefix, m.title])
+           } else {
++            // 标记错误菜单，但仍然保留在搜索结果中
++            // 让用户可以找到，但在显示时给出标记
+             pool.push({
+               ...m,
+               fullTitle: [...titlePrefix, m.title].join(' / ')
