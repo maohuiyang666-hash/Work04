@@ -2,15 +2,23 @@ import { request } from '@/api/service'
 
 export const crudOptions = (vm) => {
   return {
-    indexRow: { // 或者直接传true,不显示title，不居中
+    indexRow: {
       width: 60,
       title: '序号',
       align: 'center'
     },
     options: {
       tableType: 'vxe-table',
-      rowKey: true, // 必须设置，true or false
-      height: '100%' // 表格高度100%, 使用toolbar必须设置
+      rowKey: true,
+      rowId: 'id',
+      height: '100%'
+    },
+    selectionRow: {
+      align: 'center',
+      width: 46,
+      show () {
+        return vm.tabActivted === 'receive'
+      }
     },
     rowHandle: {
       width: 160,
@@ -63,7 +71,7 @@ export const crudOptions = (vm) => {
         },
         width: 200,
         form: {
-          rules: [ // 表单校验规则
+          rules: [
             {
               required: true,
               message: '必填项'
@@ -127,8 +135,8 @@ export const crudOptions = (vm) => {
         dict: {
           cache: false,
           url: '/api/system/user/',
-          value: 'id', // 数据字典中value字段的属性名
-          label: 'name', // 数据字典中label字段的属性名
+          value: 'id',
+          label: 'name',
           getData: (url, dict, {
             form,
             component
@@ -148,7 +156,7 @@ export const crudOptions = (vm) => {
           }
         },
         form: {
-          rules: [ // 表单校验规则
+          rules: [
             {
               required: true,
               message: '必填项'
@@ -196,8 +204,8 @@ export const crudOptions = (vm) => {
         dict: {
           cache: false,
           url: '/api/system/role/',
-          value: 'id', // 数据字典中value字段的属性名
-          label: 'name', // 数据字典中label字段的属性名
+          value: 'id',
+          label: 'name',
           getData: (url, dict, {
             form,
             component
@@ -217,7 +225,7 @@ export const crudOptions = (vm) => {
           }
         },
         form: {
-          rules: [ // 表单校验规则
+          rules: [
             {
               required: true,
               message: '必填项'
@@ -265,9 +273,9 @@ export const crudOptions = (vm) => {
           cache: false,
           url: '/api/system/dept/all_dept/',
           isTree: true,
-          value: 'id', // 数据字典中value字段的属性名
-          label: 'name', // 数据字典中label字段的属性名
-          children: 'children', // 数据字典中children字段的属性名
+          value: 'id',
+          label: 'name',
+          children: 'children',
           getData: (url, dict, {
             form,
             component
@@ -281,7 +289,7 @@ export const crudOptions = (vm) => {
         },
         disabled: true,
         form: {
-          rules: [ // 表单校验规则
+          rules: [
             {
               required: true,
               message: '必填项'
@@ -333,9 +341,9 @@ export const crudOptions = (vm) => {
         title: '内容',
         key: 'content',
         minWidth: 300,
-        type: 'editor-quill', // 富文本图片上传依赖file-uploader，请先配置好file-uploader
+        type: 'editor-quill',
         form: {
-          rules: [ // 表单校验规则
+          rules: [
             {
               required: true,
               message: '必填项'
@@ -347,7 +355,7 @@ export const crudOptions = (vm) => {
             },
             props: {
               uploader: {
-                type: 'form' // 上传后端类型【cos,aliyun,oss,form】
+                type: 'form'
               }
             },
             events: {

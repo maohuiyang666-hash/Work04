@@ -8,17 +8,19 @@ export function GetList (query) {
   })
 }
 
-/**
- * 获取自己接收的消息
- * @param query
- * @returns {*}
- * @constructor
- */
 export function GetSelfReceive (query) {
   return request({
     url: urlPrefix + 'get_self_receive/',
     method: 'get',
     params: query
+  })
+}
+
+export function MarkSelfReceiveRead (ids) {
+  return request({
+    url: urlPrefix + 'mark_self_receive_read/',
+    method: 'post',
+    data: { ids }
   })
 }
 

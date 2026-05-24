@@ -1,0 +1,526 @@
+diff --git a/backend/dvadmin/system/views/message_center.py b/backend/dvadmin/system/views/message_center.py
+index 67e547b3..5340ca02 100644
+--- a/backend/dvadmin/system/views/message_center.py
++++ b/backend/dvadmin/system/views/message_center.py
+@@ -1,16 +1,15 @@
+ # -*- coding: utf-8 -*-
+-import json
+ 
+-from asgiref.sync import async_to_sync
+-from channels.layers import get_channel_layer
++from django.db.models import BooleanField, OuterRef, Subquery
++from django.utils import timezone
+ from django_restql.fields import DynamicSerializerMethodField
+ from rest_framework import serializers
+-from rest_framework.decorators import action, permission_classes
+-from rest_framework.permissions import IsAuthenticated, AllowAny
++from rest_framework.decorators import action
++from rest_framework.permissions import IsAuthenticated
+ 
+ from application.websocketConfig import websocket_push
+ from dvadmin.system.models import MessageCenter, Users, MessageCenterTargetUser
+-from dvadmin.utils.json_response import SuccessResponse, DetailResponse
++from dvadmin.utils.json_response import SuccessResponse, DetailResponse, ErrorResponse
+ from dvadmin.utils.serializers import CustomModelSerializer
+ from dvadmin.utils.viewset import CustomModelViewSet
+ 
+@@ -26,8 +25,6 @@ class MessageCenterSerializer(CustomModelSerializer):
+ 
+     def get_role_info(self, instance, parsed_query):
+         roles = instance.target_role.all()
+-        # You can do what ever you want in here
+-        # `parsed_query` param is passed to BookSerializer to allow further querying
+         from dvadmin.system.views.role import RoleSerializer
+         serializer = RoleSerializer(
+             roles,
+@@ -38,8 +35,6 @@ class MessageCenterSerializer(CustomModelSerializer):
+ 
+     def get_user_info(self, instance, parsed_query):
+         users = instance.target_user.all()
+-        # You can do what ever you want in here
+-        # `parsed_query` param is passed to BookSerializer to allow further querying
+         from dvadmin.system.views.user import UserSerializer
+         serializer = UserSerializer(
+             users,
+@@ -50,8 +45,6 @@ class MessageCenterSerializer(CustomModelSerializer):
+ 
+     def get_dept_info(self, instance, parsed_query):
+         dept = instance.target_dept.all()
+-        # You can do what ever you want in here
+-        # `parsed_query` param is passed to BookSerializer to allow further querying
+         from dvadmin.system.views.dept import DeptSerializer
+         serializer = DeptSerializer(
+             dept,
+@@ -84,9 +77,12 @@ class MessageCenterTargetUserListSerializer(CustomModelSerializer):
+     is_read = serializers.SerializerMethodField()
+ 
+     def get_is_read(self, instance):
++        current_user_is_read = getattr(instance, 'current_user_is_read', None)
++        if current_user_is_read is not None:
++            return current_user_is_read
+         user_id = self.request.user.id
+         message_center_id = instance.id
+-        queryset = MessageCenterTargetUser.objects.filter(messagecenter__id=message_center_id,users_id=user_id).first()
++        queryset = MessageCenterTargetUser.objects.filter(messagecenter__id=message_center_id, users_id=user_id).first()
+         if queryset:
+             return queryset.is_read
+         return False
+@@ -106,15 +102,14 @@ class MessageCenterCreateSerializer(CustomModelSerializer):
+         data = super().save(**kwargs)
+         initial_data = self.initial_data
+         target_type = initial_data.get('target_type')
+-        # 在保存之前,根据目标类型,把目标用户查询出来并保存
+         users = initial_data.get('target_user', [])
+-        if target_type in [1]:  # 按角色
+-            target_role = initial_data.get('target_role',[])
++        if target_type in [1]:
++            target_role = initial_data.get('target_role', [])
+             users = Users.objects.filter(role__id__in=target_role).values_list('id', flat=True)
+-        if target_type in [2]:  # 按部门
+-            target_dept = initial_data.get('target_dept',[])
++        if target_type in [2]:
++            target_dept = initial_data.get('target_dept', [])
+             users = Users.objects.filter(dept__id__in=target_dept).values_list('id', flat=True)
+-        if target_type in [3]:  # 系统通知
++        if target_type in [3]:
+             users = Users.objects.values_list('id', flat=True)
+             websocket_push("dvadmin", message={"sender": 'system', "contentType": 'SYSTEM',
+                                                "content": '您有一条新消息~', "refresh_unread": True})
+@@ -124,7 +119,7 @@ class MessageCenterCreateSerializer(CustomModelSerializer):
+                 "messagecenter": data.id,
+                 "users": user
+             })
+-            if target_type in [1,2]:
++            if target_type in [1, 2]:
+                 room_name = f"user_{user}"
+                 websocket_push(room_name, message={"sender": 'system', "contentType": 'SYSTEM',
+                                                    "content": '您有一条新消息~', "refresh_unread": True})
+@@ -158,46 +153,67 @@ class MessageCenterViewSet(CustomModelViewSet):
+             return MessageCenter.objects.filter(creator=self.request.user.id).all()
+         return MessageCenter.objects.all()
+ 
++    def get_self_receive_queryset(self):
++        user_id = self.request.user.id
++        relation_queryset = MessageCenterTargetUser.objects.filter(users_id=user_id)
++        status = self.request.query_params.get('status')
++        if status == 'unread':
++            relation_queryset = relation_queryset.filter(is_read=False)
++        elif status == 'read':
++            relation_queryset = relation_queryset.filter(is_read=True)
++        current_user_relation = MessageCenterTargetUser.objects.filter(
++            users_id=user_id,
++            messagecenter_id=OuterRef('pk')
++        ).values('is_read')[:1]
++        queryset = MessageCenter.objects.filter(id__in=relation_queryset.values('messagecenter_id')).annotate(
++            current_user_is_read=Subquery(current_user_relation, output_field=BooleanField())
++        )
++        title = self.request.query_params.get('title')
++        if title:
++            queryset = queryset.filter(title__icontains=title)
++        return queryset.distinct()
++
+     def retrieve(self, request, *args, **kwargs):
+-        """
+-        重写查看
+-        """
+         pk = kwargs.get('pk')
+         user_id = self.request.user.id
+         queryset = MessageCenterTargetUser.objects.filter(users__id=user_id, messagecenter__id=pk).first()
+-        if queryset:
++        if queryset and not queryset.is_read:
+             queryset.is_read = True
+             queryset.save()
+         instance = self.get_object()
+         serializer = self.get_serializer(instance)
+-        # 主动推送消息
+         room_name = f"user_{user_id}"
+         websocket_push(room_name, message={"sender": 'system', "contentType": 'TEXT',
+-                                 "content": '您查看了一条消息~', "refresh_unread": True})
++                                           "content": '您查看了一条消息~', "refresh_unread": True})
+         return DetailResponse(data=serializer.data, msg="获取成功")
+ 
+     @action(methods=['GET'], detail=False, permission_classes=[IsAuthenticated])
+     def get_self_receive(self, request):
+-        """
+-        获取接收到的消息
+-        """
+-        self_user_id = self.request.user.id
+-        # queryset = MessageCenterTargetUser.objects.filter(users__id=self_user_id).order_by('-create_datetime')
+-        queryset = MessageCenter.objects.filter(target_user__id=self_user_id)
+-        print(queryset)
+-        # queryset = self.filter_queryset(queryset)
+-        page = self.paginate_queryset(queryset)
++        self_user_queryset = self.get_self_receive_queryset()
++        page = self.paginate_queryset(self_user_queryset)
+         if page is not None:
+             serializer = MessageCenterTargetUserListSerializer(page, many=True, request=request)
+             return self.get_paginated_response(serializer.data)
+-        serializer = MessageCenterTargetUserListSerializer(queryset, many=True, request=request)
++        serializer = MessageCenterTargetUserListSerializer(self_user_queryset, many=True, request=request)
+         return SuccessResponse(data=serializer.data, msg="获取成功")
+ 
++    @action(methods=['POST'], detail=False, permission_classes=[IsAuthenticated])
++    def mark_self_receive_read(self, request):
++        message_ids = request.data.get('ids') or []
++        if not isinstance(message_ids, list):
++            message_ids = [message_ids]
++        message_ids = [message_id for message_id in message_ids if message_id not in [None, '']]
++        if not message_ids:
++            return ErrorResponse(msg="请先选择消息")
++        updated_count = MessageCenterTargetUser.objects.filter(
++            users_id=request.user.id,
++            messagecenter_id__in=message_ids,
++            is_read=False
++        ).update(is_read=True, update_datetime=timezone.now())
++        return DetailResponse(data={"updated_count": updated_count}, msg="标记已读成功")
++
+     @action(methods=['GET'], detail=False, permission_classes=[IsAuthenticated])
+     def get_newest_msg(self, request):
+-        """
+-        获取最新的一条消息
+-        """
+         self_user_id = self.request.user.id
+         queryset = MessageCenterTargetUser.objects.filter(users__id=self_user_id).order_by('create_datetime').last()
+         data = None
+@@ -208,7 +224,6 @@ class MessageCenterViewSet(CustomModelViewSet):
+ 
+     @action(methods=['GET'], detail=False, permission_classes=[IsAuthenticated])
+     def get_unread_msg(self, request):
+-        """获取未读消息数量"""
+         self_user_id = self.request.user.id
+-        count = MessageCenterTargetUser.objects.filter(users__id=self_user_id,is_read=False).count()
+-        return DetailResponse(data={"count":count}, msg="获取成功")
+\ No newline at end of file
++        count = MessageCenterTargetUser.objects.filter(users__id=self_user_id, is_read=False).count()
++        return DetailResponse(data={"count": count}, msg="获取成功")
+diff --git a/web/src/views/system/messageCenter/api.js b/web/src/views/system/messageCenter/api.js
+index 384a7875..17931a90 100644
+--- a/web/src/views/system/messageCenter/api.js
++++ b/web/src/views/system/messageCenter/api.js
+@@ -8,12 +8,6 @@ export function GetList (query) {
+   })
+ }
+ 
+-/**
+- * 获取自己接收的消息
+- * @param query
+- * @returns {*}
+- * @constructor
+- */
+ export function GetSelfReceive (query) {
+   return request({
+     url: urlPrefix + 'get_self_receive/',
+@@ -22,6 +16,14 @@ export function GetSelfReceive (query) {
+   })
+ }
+ 
++export function MarkSelfReceiveRead (ids) {
++  return request({
++    url: urlPrefix + 'mark_self_receive_read/',
++    method: 'post',
++    data: { ids }
++  })
++}
++
+ export function GetObj (obj) {
+   return request({
+     url: urlPrefix + obj.id + '/',
+diff --git a/web/src/views/system/messageCenter/crud.js b/web/src/views/system/messageCenter/crud.js
+index 94a56e76..7ecf0df1 100644
+--- a/web/src/views/system/messageCenter/crud.js
++++ b/web/src/views/system/messageCenter/crud.js
+@@ -2,15 +2,23 @@ import { request } from '@/api/service'
+ 
+ export const crudOptions = (vm) => {
+   return {
+-    indexRow: { // 或者直接传true,不显示title，不居中
++    indexRow: {
+       width: 60,
+       title: '序号',
+       align: 'center'
+     },
+     options: {
+       tableType: 'vxe-table',
+-      rowKey: true, // 必须设置，true or false
+-      height: '100%' // 表格高度100%, 使用toolbar必须设置
++      rowKey: true,
++      rowId: 'id',
++      height: '100%'
++    },
++    selectionRow: {
++      align: 'center',
++      width: 46,
++      show () {
++        return vm.tabActivted === 'receive'
++      }
+     },
+     rowHandle: {
+       width: 160,
+@@ -63,7 +71,7 @@ export const crudOptions = (vm) => {
+         },
+         width: 200,
+         form: {
+-          rules: [ // 表单校验规则
++          rules: [
+             {
+               required: true,
+               message: '必填项'
+@@ -127,8 +135,8 @@ export const crudOptions = (vm) => {
+         dict: {
+           cache: false,
+           url: '/api/system/user/',
+-          value: 'id', // 数据字典中value字段的属性名
+-          label: 'name', // 数据字典中label字段的属性名
++          value: 'id',
++          label: 'name',
+           getData: (url, dict, {
+             form,
+             component
+@@ -148,7 +156,7 @@ export const crudOptions = (vm) => {
+           }
+         },
+         form: {
+-          rules: [ // 表单校验规则
++          rules: [
+             {
+               required: true,
+               message: '必填项'
+@@ -196,8 +204,8 @@ export const crudOptions = (vm) => {
+         dict: {
+           cache: false,
+           url: '/api/system/role/',
+-          value: 'id', // 数据字典中value字段的属性名
+-          label: 'name', // 数据字典中label字段的属性名
++          value: 'id',
++          label: 'name',
+           getData: (url, dict, {
+             form,
+             component
+@@ -217,7 +225,7 @@ export const crudOptions = (vm) => {
+           }
+         },
+         form: {
+-          rules: [ // 表单校验规则
++          rules: [
+             {
+               required: true,
+               message: '必填项'
+@@ -265,9 +273,9 @@ export const crudOptions = (vm) => {
+           cache: false,
+           url: '/api/system/dept/all_dept/',
+           isTree: true,
+-          value: 'id', // 数据字典中value字段的属性名
+-          label: 'name', // 数据字典中label字段的属性名
+-          children: 'children', // 数据字典中children字段的属性名
++          value: 'id',
++          label: 'name',
++          children: 'children',
+           getData: (url, dict, {
+             form,
+             component
+@@ -281,7 +289,7 @@ export const crudOptions = (vm) => {
+         },
+         disabled: true,
+         form: {
+-          rules: [ // 表单校验规则
++          rules: [
+             {
+               required: true,
+               message: '必填项'
+@@ -333,9 +341,9 @@ export const crudOptions = (vm) => {
+         title: '内容',
+         key: 'content',
+         minWidth: 300,
+-        type: 'editor-quill', // 富文本图片上传依赖file-uploader，请先配置好file-uploader
++        type: 'editor-quill',
+         form: {
+-          rules: [ // 表单校验规则
++          rules: [
+             {
+               required: true,
+               message: '必填项'
+@@ -347,7 +355,7 @@ export const crudOptions = (vm) => {
+             },
+             props: {
+               uploader: {
+-                type: 'form' // 上传后端类型【cos,aliyun,oss,form】
++                type: 'form'
+               }
+             },
+             events: {
+diff --git a/web/src/views/system/messageCenter/index.vue b/web/src/views/system/messageCenter/index.vue
+index 408c8885..a84b9a54 100644
+--- a/web/src/views/system/messageCenter/index.vue
++++ b/web/src/views/system/messageCenter/index.vue
+@@ -1,6 +1,5 @@
+ <template>
+   <d2-container :class="{'page-compact':crud.pageOptions.compact}">
+-
+     <d2-crud-x
+       ref="d2Crud"
+       v-bind="_crudProps"
+@@ -9,46 +8,66 @@
+       @doDialogClosed="doDialogClosed"
+     >
+       <div slot="header">
+-        <crud-search ref="search" :options="crud.searchOptions" @submit="handleSearch"  />
+-        <el-button size="small" type="primary" @click="addRow"><i class="el-icon-plus"/> 新增</el-button>
++        <crud-search ref="search" :options="crud.searchOptions" @submit="handleSearch" />
++        <el-button v-if="tabActivted === 'send'" size="small" type="primary" @click="addRow"><i class="el-icon-plus"/> 新增</el-button>
+         <el-tabs v-model="tabActivted" @tab-click="onTabClick">
+           <el-tab-pane label="我的发布" name="send"></el-tab-pane>
+           <el-tab-pane label="我的接收" name="receive"></el-tab-pane>
+         </el-tabs>
++        <div v-if="tabActivted === 'receive'" class="receive-toolbar">
++          <div class="receive-toolbar__left">
++            <span class="receive-toolbar__label">消息状态</span>
++            <el-radio-group v-model="receiveStatus" size="small" @change="onReceiveStatusChange">
++              <el-radio-button label="all">全部</el-radio-button>
++              <el-radio-button label="unread">未读</el-radio-button>
++              <el-radio-button label="read">已读</el-radio-button>
++            </el-radio-group>
++          </div>
++          <el-button
++            size="small"
++            type="primary"
++            :loading="batchLoading"
++            :disabled="batchLoading || receiveSelection.length === 0"
++            @click="onBatchMarkRead"
++          >
++            批量标记已读
++          </el-button>
++        </div>
+         <crud-toolbar :search.sync="crud.searchOptions.show"
+                       :compact.sync="crud.pageOptions.compact"
+                       :columns="crud.columns"
+                       @refresh="doRefresh()"
+                       @columns-filter-changed="handleColumnsFilterChanged"/>
+       </div>
+-
+     </d2-crud-x>
+   </d2-container>
+ </template>
+ 
+ <script>
+-import { AddObj, GetObj, GetList, UpdateObj, DelObj, GetSelfReceive } from './api'
++import { AddObj, GetObj, GetList, UpdateObj, DelObj, GetSelfReceive, MarkSelfReceiveRead } from './api'
+ import { crudOptions } from './crud'
+ import { d2CrudPlus } from 'd2-crud-plus'
+ import viewTemplate from './viewTemplate.js'
++
+ export default {
+   name: 'messageCenter',
+   components: {},
+   mixins: [d2CrudPlus.crud],
+   data () {
+     return {
+-      tabActivted: 'send'
++      tabActivted: 'send',
++      receiveStatus: 'all',
++      receiveSelection: [],
++      batchLoading: false
+     }
+   },
+-  computed: {
+-  },
+   methods: {
+     getCrudOptions () {
+       return crudOptions(this)
+     },
+     pageRequest (query) {
+       if (this.tabActivted === 'receive') {
+-        return GetSelfReceive({ ...query })
++        return GetSelfReceive({ ...query, status: this.receiveStatus })
+       }
+       return GetList(query)
+     },
+@@ -72,15 +91,85 @@ export default {
+       })
+       this.infoRequest(row)
+     },
++    doSelectionChange (selection) {
++      this.receiveSelection = this.tabActivted === 'receive' ? selection : []
++    },
+     onTabClick (tab) {
+-      const { name } = tab
+-      this.tabActivted = name
++      this.tabActivted = tab.name
++      this.clearReceiveSelection()
+       this.doRefresh()
+     },
+-    // 关闭事件
+-    doDialogClosed (context) {
++    onReceiveStatusChange () {
++      this.clearReceiveSelection()
+       this.doRefresh()
++    },
++    async onBatchMarkRead () {
++      if (this.receiveSelection.length === 0) {
++        this.$message.warning('请先选择消息')
++        return
++      }
++      this.batchLoading = true
++      try {
++        await MarkSelfReceiveRead(this.receiveSelection.map(item => item.id))
++        this.$message.success('批量标记已读成功')
++        this.clearReceiveSelection()
++        await this.$store.dispatch('d2admin/messagecenter/setUnread')
++        this.doRefresh()
++      } finally {
++        this.batchLoading = false
++      }
++    },
++    clearReceiveSelection () {
++      this.receiveSelection = []
++      this.$nextTick(() => {
++        const table = this.getD2CrudTable && this.getD2CrudTable()
++        if (!table) {
++          return
++        }
++        if (typeof table.clearSelection === 'function') {
++          table.clearSelection()
++        }
++        if (typeof table.clearCheckboxRow === 'function') {
++          table.clearCheckboxRow()
++        }
++        if (typeof table.clearCheckboxReserve === 'function') {
++          table.clearCheckboxReserve()
++        }
++        if (typeof table.clearCheckboxAll === 'function') {
++          table.clearCheckboxAll()
++        }
++      })
++    },
++    doAfterRefresh () {
++      this.clearReceiveSelection()
++    },
++    doDialogClosed () {
++      this.clearReceiveSelection()
++      this.doRefresh()
++      if (this.tabActivted === 'receive') {
++        this.$store.dispatch('d2admin/messagecenter/setUnread')
++      }
+     }
+   }
+ }
+ </script>
++
++<style scoped>
++.receive-toolbar {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  margin-bottom: 12px;
++}
++
++.receive-toolbar__left {
++  display: flex;
++  align-items: center;
++  gap: 12px;
++}
++
++.receive-toolbar__label {
++  font-size: 14px;
++  color: #606266;
++}
++</style>
