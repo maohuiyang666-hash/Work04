@@ -10,7 +10,14 @@ export const crudOptions = (vm) => {
     options: {
       tableType: 'vxe-table',
       rowKey: true, // 必须设置，true or false
-      height: '100%' // 表格高度100%, 使用toolbar必须设置
+      height: '100%', // 表格高度100%，使用toolbar必须设置
+      highlightCurrentRow: true
+    },
+    selection: {
+      show: vm.tabActivted === 'receive', // 仅在接收消息页面显示多选框
+      reserve: true,
+      width: 55,
+      align: 'center'
     },
     rowHandle: {
       width: 160,

@@ -182,9 +182,16 @@ class MessageCenterViewSet(CustomModelViewSet):
         获取接收到的消息
         """
         self_user_id = self.request.user.id
-        # queryset = MessageCenterTargetUser.objects.filter(users__id=self_user_id).order_by('-create_datetime')
-        queryset = MessageCenter.objects.filter(target_user__id=self_user_id)
-        print(queryset)
+        is_read = request.query_params.get('is_read', None)
+        # 先获取相关联的 MessageCenterTargetUser 记录
+        target_user_queryset = MessageCenterTargetUser.objects.filter(users__id=self_user_id)
+        if is_read is not None:
+            is_read_bool = is_read.lower() in ['true', '1']
+            target_user_queryset = target_user_queryset.filter(is_read=is_read_bool)
+        # 获取消息 ID
+        message_ids = target_user_queryset.values_list('messagecenter_id', flat=True)
+        # 查询消息
+        queryset = MessageCenter.objects.filter(id__in=message_ids)
         # queryset = self.filter_queryset(queryset)
         page = self.paginate_queryset(queryset)
         if page is not None:
@@ -192,6 +199,27 @@ class MessageCenterViewSet(CustomModelViewSet):
             return self.get_paginated_response(serializer.data)
         serializer = MessageCenterTargetUserListSerializer(queryset, many=True, request=request)
         return SuccessResponse(data=serializer.data, msg="获取成功")
+
+    @action(methods=['POST'], detail=False, permission_classes=[IsAuthenticated])
+    def batch_mark_read(self, request):
+        """
+        批量标记已读
+        """
+        self_user_id = self.request.user.id
+        message_ids = request.data.get('message_ids', [])
+        if not message_ids:
+            return DetailResponse(data={}, msg="请选择要标记的消息")
+        # 更新已读状态
+        updated = MessageCenterTargetUser.objects.filter(
+            users__id=self_user_id,
+            messagecenter__id__in=message_ids,
+            is_read=False
+        ).update(is_read=True)
+        # 主动推送消息，刷新未读数
+        room_name = f"user_{self_user_id}"
+        websocket_push(room_name, message={"sender": 'system', "contentType": 'TEXT',
+                                           "content": '您批量标记了消息已读', "refresh_unread": True})
+        return DetailResponse(data={"updated": updated}, msg="标记成功")
 
     @action(methods=['GET'], detail=False, permission_classes=[IsAuthenticated])
     def get_newest_msg(self, request):
