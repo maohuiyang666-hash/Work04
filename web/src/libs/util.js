@@ -3,6 +3,8 @@ import db from './util.db'
 import log from './util.log'
 import dayjs from 'dayjs'
 import filterParams from './util.params'
+import { Notification } from 'element-ui'
+
 const util = {
   cookies,
   db,
@@ -11,7 +13,79 @@ const util = {
 }
 
 /**
+ * @description 检查开发环境变量
+ */
+util.checkEnv = function () {
+  if (process.env.NODE_ENV !== 'development') {
+    return
+  }
+  const api = process.env.VUE_APP_API
+  let errorMsg = ''
+  if (!api) {
+    errorMsg = 'VUE_APP_API 未配置或为空，请检查 .env 文件。'
+  } else if (!api.startsWith('http://') && !api.startsWith('https://') && !api.startsWith('/')) {
+    errorMsg = `VUE_APP_API (${api}) 格式不规范，建议以 http/https 或 / 开头。`
+  }
+
+  if (errorMsg) {
+    console.error(`[工程化配置检查] ${errorMsg}`)
+    setTimeout(() => {
+      Notification({
+        title: '前端配置异常',
+        message: errorMsg,
+        type: 'error',
+        duration: 0
+      })
+    }, 2000)
+  }
+}
+
+/**
+ * @description 统一构建基础URL
+ * @param {String} type - 'api' | 'ws'
+ */
+util.buildBaseUrl = function (type = 'api') {
+  let baseURL = process.env.VUE_APP_API || ''
+  if (!baseURL) {
+    return '/'
+  }
+
+  const isTenantMode = window.pluginsAll && window.pluginsAll.indexOf('dvadmin-tenants-web') !== -1
+  let param = baseURL.split('/')[3] || ''
+
+  if (isTenantMode && (!param || baseURL.startsWith('/'))) {
+    // 租户模式：把域名替换成当前域名+端口
+    const host = baseURL.split('/')[2]
+    if (host) {
+      const prot = baseURL.split(':')[2] || 80
+      let newHost = document.domain
+      if (prot != 80 && prot != 443) {
+        newHost += ':' + prot
+      }
+      baseURL = baseURL.split('/')[0] + '//' + baseURL.split('/')[1] + newHost + '/' + param
+    } else {
+      baseURL = location.protocol + '//' + location.hostname + (location.port ? ':' : '') + location.port + baseURL
+    }
+  }
+
+  // WS协议处理
+  if (type === 'ws') {
+    if (baseURL.startsWith('/')) {
+      baseURL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.hostname + (location.port ? ':' : '') + location.port + baseURL
+    } else if (baseURL.startsWith('http')) {
+      baseURL = baseURL.replace(/^http(s)?:\/\//, 'ws$1://')
+    }
+  }
+
+  if (!baseURL.endsWith('/')) {
+    baseURL += '/'
+  }
+  return baseURL
+}
+
+/**
  * @description 更新标题
+
  * @param {String} titleText 标题
  */
 util.title = function (titleText) {
@@ -36,30 +110,7 @@ util.open = function (url) {
  * @description 校验是否为租户模式。租户模式把域名替换成 域名 加端口
  */
 util.baseURL = function () {
-  var baseURL = process.env.VUE_APP_API
-  var param = baseURL.split('/')[3] || ''
-  if (window.pluginsAll && window.pluginsAll.indexOf('dvadmin-tenants-web') !== -1 && (!param || baseURL.startsWith('/'))) {
-    // 1.把127.0.0.1 替换成和前端一样域名
-    // 2.把 ip 地址替换成和前端一样域名
-    // 3.把 /api 或其他类似的替换成和前端一样域名
-    // document.domain
-    var host = baseURL.split('/')[2]
-    if (host) {
-      var prot = baseURL.split(':')[2] || 80
-      if (prot === 80 || prot === 443) {
-        host = document.domain
-      } else {
-        host = document.domain + ':' + prot
-      }
-      baseURL = baseURL.split('/')[0] + '//' + baseURL.split('/')[1] + host + '/' + param
-    } else {
-      baseURL = location.protocol + '//' + location.hostname + (location.port ? ':' : '') + location.port + baseURL
-    }
-  }
-  if (!baseURL.endsWith('/')) {
-    baseURL += '/'
-  }
-  return baseURL
+  return util.buildBaseUrl('api')
 }
 
 util.baseFileURL = function () {
@@ -68,36 +119,9 @@ util.baseFileURL = function () {
   }
   return util.baseURL()
 }
+
 util.wsBaseURL = function () {
-  var baseURL = process.env.VUE_APP_API
-  var param = baseURL.split('/')[3] || ''
-  if (window.pluginsAll && window.pluginsAll.indexOf('dvadmin-tenants-web') !== -1 && (!param || baseURL.startsWith('/'))) {
-    // 1.把127.0.0.1 替换成和前端一样域名
-    // 2.把 ip 地址替换成和前端一样域名
-    // 3.把 /api 或其他类似的替换成和前端一样域名
-    // document.domain
-    var host = baseURL.split('/')[2]
-    if (host) {
-      var prot = baseURL.split(':')[2] || 80
-      if (prot === 80 || prot === 443) {
-        host = document.domain
-      } else {
-        host = document.domain + ':' + prot
-      }
-      baseURL = baseURL.split('/')[0] + '//' + baseURL.split('/')[1] + host + '/' + param
-    } else {
-      baseURL = location.protocol + '//' + location.hostname + (location.port ? ':' : '') + location.port + baseURL
-    }
-  } else if (param !== '' || baseURL.startsWith('/')) {
-    baseURL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.hostname + (location.port ? ':' : '') + location.port + baseURL
-  }
-  if (!baseURL.endsWith('/')) {
-    baseURL += '/'
-  }
-  if (baseURL.startsWith('http')) { // https 也默认会被替换成 wss
-    baseURL = baseURL.replace('http', 'ws')
-  }
-  return baseURL
+  return util.buildBaseUrl('ws')
 }
 /**
  * 自动生成ID

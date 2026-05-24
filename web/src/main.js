@@ -49,6 +49,10 @@ Vue.prototype.$md5 = md5
 Vue.prototype.$util = util
 Vue.prototype.$websocket = websocket
 Vue.prototype.$echarts = echarts
+
+// 启动时检查环境变量配置
+util.checkEnv()
+
 new Vue({
   router,
   store,
