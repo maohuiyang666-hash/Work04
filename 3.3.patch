@@ -1,0 +1,122 @@
+diff --git a/web/src/menu/index.js b/web/src/menu/index.js
+index 422d23f6..db55c1fc 100644
+--- a/web/src/menu/index.js
++++ b/web/src/menu/index.js
+@@ -37,20 +37,56 @@ export const getMenu = function () {
+   })
+ }
+ 
++let viewsContext = null
++try {
++  // Use lazy to avoid bundling all views into the main chunk synchronously
++  viewsContext = require.context('@/views', true, /\.(vue|js)$/, 'lazy')
++} catch (e) {}
++
++let cachedKeys = null
++
++const checkComponentExists = (componentPath) => {
++  if (!viewsContext) return true // Fallback
++  if (!componentPath) return false
++  
++  if (componentPath.startsWith('plugins/')) return true // Plugins are handled differently
++
++  let p = componentPath
++  if (p.startsWith('/')) p = p.slice(1)
++  
++  const possiblePaths = [
++    `./${p}`,
++    `./${p}.vue`,
++    `./${p}.js`,
++    `./${p}/index.vue`,
++    `./${p}/index.js`
++  ]
++  
++  if (!cachedKeys) {
++    cachedKeys = viewsContext.keys()
++  }
++  
++  for (const path of possiblePaths) {
++    if (cachedKeys.includes(path)) {
++      return true
++    }
++  }
++  return false
++}
++
+ /**
+  * 校验路由是否有效
+  */
+ export const checkRouter = function (menuData) {
+   const result = []
+   for (const item of menuData) {
+-    try {
+-      if (item.path !== '' && item.component) {
+-        (item.component && item.component.substr(0, 8) === 'plugins/') ? pluginImport(item.component.replace('plugins/', '')) : _import(item.component)
++    if (item.path !== '' && item.component) {
++      if (!checkComponentExists(item.component)) {
++        console.log(`导入菜单错误，会导致页面无法访问，请检查文件是否存在：${item.component}`)
++        item.is_invalid = true
+       }
+-      result.push(item)
+-    } catch (err) {
+-      console.log(`导入菜单错误，会导致页面无法访问，请检查文件是否存在：${item.component}`)
+     }
++    result.push(item)
+   }
+   return result
+ }
+@@ -64,12 +100,17 @@ export const handleRouter = function (menuData) {
+       const obj = {
+         path: item.path,
+         name: item.component_name,
+-        component: (item.component && item.component.substr(0, 8) === 'plugins/') ? pluginImport(item.component.replace('plugins/', '')) : _import(item.component),
++        component: item.is_invalid 
++          ? () => import('@/views/system/error/menu/index.vue')
++          : ((item.component && item.component.substr(0, 8) === 'plugins/') 
++            ? pluginImport(item.component.replace('plugins/', '')) 
++            : _import(item.component)),
+         meta: {
+           title: item.name,
+           auth: true,
+-          cache: item.cache,
+-          openInNewWindow: item.frame_out
++          cache: item.is_invalid ? false : item.cache,
++          openInNewWindow: item.frame_out,
++          is_invalid: item.is_invalid
+         }
+       }
+       if (item.frame_out) {
+diff --git a/web/src/store/modules/d2admin/modules/page.js b/web/src/store/modules/d2admin/modules/page.js
+index 2d81cde1..f7b5eb87 100644
+--- a/web/src/store/modules/d2admin/modules/page.js
++++ b/web/src/store/modules/d2admin/modules/page.js
+@@ -381,7 +381,7 @@ export default {
+           if (route.children && route.children.length > 0) {
+             push(route.children)
+           } else {
+-            if (!route.hidden) {
++            if (!route.hidden && (!route.meta || !route.meta.is_invalid)) {
+               const { meta, name, path } = route
+               pool.push({ meta, name, path })
+             }
+diff --git a/web/src/store/modules/d2admin/modules/search.js b/web/src/store/modules/d2admin/modules/search.js
+index 04e4280d..59c5eabf 100644
+--- a/web/src/store/modules/d2admin/modules/search.js
++++ b/web/src/store/modules/d2admin/modules/search.js
+@@ -41,10 +41,12 @@ export default {
+           if (m.children) {
+             push(m.children, [...titlePrefix, m.title])
+           } else {
+-            pool.push({
+-              ...m,
+-              fullTitle: [...titlePrefix, m.title].join(' / ')
+-            })
++            if (!m.is_invalid) {
++              pool.push({
++                ...m,
++                fullTitle: [...titlePrefix, m.title].join(' / ')
++              })
++            }
+           }
+         })
+       }

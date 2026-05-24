@@ -41,10 +41,12 @@ export default {
           if (m.children) {
             push(m.children, [...titlePrefix, m.title])
           } else {
-            pool.push({
-              ...m,
-              fullTitle: [...titlePrefix, m.title].join(' / ')
-            })
+            if (!m.is_invalid) {
+              pool.push({
+                ...m,
+                fullTitle: [...titlePrefix, m.title].join(' / ')
+              })
+            }
           }
         })
       }

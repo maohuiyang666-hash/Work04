@@ -37,20 +37,56 @@ export const getMenu = function () {
   })
 }
 
+let viewsContext = null
+try {
+  // Use lazy to avoid bundling all views into the main chunk synchronously
+  viewsContext = require.context('@/views', true, /\.(vue|js)$/, 'lazy')
+} catch (e) {}
+
+let cachedKeys = null
+
+const checkComponentExists = (componentPath) => {
+  if (!viewsContext) return true // Fallback
+  if (!componentPath) return false
+  
+  if (componentPath.startsWith('plugins/')) return true // Plugins are handled differently
+
+  let p = componentPath
+  if (p.startsWith('/')) p = p.slice(1)
+  
+  const possiblePaths = [
+    `./${p}`,
+    `./${p}.vue`,
+    `./${p}.js`,
+    `./${p}/index.vue`,
+    `./${p}/index.js`
+  ]
+  
+  if (!cachedKeys) {
+    cachedKeys = viewsContext.keys()
+  }
+  
+  for (const path of possiblePaths) {
+    if (cachedKeys.includes(path)) {
+      return true
+    }
+  }
+  return false
+}
+
 /**
  * 校验路由是否有效
  */
 export const checkRouter = function (menuData) {
   const result = []
   for (const item of menuData) {
-    try {
-      if (item.path !== '' && item.component) {
-        (item.component && item.component.substr(0, 8) === 'plugins/') ? pluginImport(item.component.replace('plugins/', '')) : _import(item.component)
+    if (item.path !== '' && item.component) {
+      if (!checkComponentExists(item.component)) {
+        console.log(`导入菜单错误，会导致页面无法访问，请检查文件是否存在：${item.component}`)
+        item.is_invalid = true
       }
-      result.push(item)
-    } catch (err) {
-      console.log(`导入菜单错误，会导致页面无法访问，请检查文件是否存在：${item.component}`)
     }
+    result.push(item)
   }
   return result
 }
@@ -64,12 +100,17 @@ export const handleRouter = function (menuData) {
       const obj = {
         path: item.path,
         name: item.component_name,
-        component: (item.component && item.component.substr(0, 8) === 'plugins/') ? pluginImport(item.component.replace('plugins/', '')) : _import(item.component),
+        component: item.is_invalid 
+          ? () => import('@/views/system/error/menu/index.vue')
+          : ((item.component && item.component.substr(0, 8) === 'plugins/') 
+            ? pluginImport(item.component.replace('plugins/', '')) 
+            : _import(item.component)),
         meta: {
           title: item.name,
           auth: true,
-          cache: item.cache,
-          openInNewWindow: item.frame_out
+          cache: item.is_invalid ? false : item.cache,
+          openInNewWindow: item.frame_out,
+          is_invalid: item.is_invalid
         }
       }
       if (item.frame_out) {

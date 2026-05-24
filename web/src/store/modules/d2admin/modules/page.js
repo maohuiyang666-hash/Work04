@@ -381,7 +381,7 @@ export default {
           if (route.children && route.children.length > 0) {
             push(route.children)
           } else {
-            if (!route.hidden) {
+            if (!route.hidden && (!route.meta || !route.meta.is_invalid)) {
               const { meta, name, path } = route
               pool.push({ meta, name, path })
             }
