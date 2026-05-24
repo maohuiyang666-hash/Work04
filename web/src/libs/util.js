@@ -3,11 +3,30 @@ import db from './util.db'
 import log from './util.log'
 import dayjs from 'dayjs'
 import filterParams from './util.params'
+import { validateConfig, logConfigErrors } from './util.config'
 const util = {
   cookies,
   db,
   log,
   filterParams
+}
+
+/**
+ * @description 初始化配置校验（开发环境早失败）
+ */
+util.initConfig = function () {
+  // 仅在开发环境执行校验
+  if (process.env.NODE_ENV !== 'production') {
+    const errors = validateConfig()
+    logConfigErrors(errors)
+    if (errors.length > 0) {
+      console.error(
+        '%c[DvAdmin配置错误]%c 检测到环境配置存在问题，应用可能无法正常工作。\n请检查控制台中的配置警告信息。',
+        'background: #F56C6C; color: white; padding: 2px 6px; border-radius: 3px;',
+        'color: #303133;'
+      )
+    }
+  }
 }
 
 /**
@@ -70,6 +89,7 @@ util.baseFileURL = function () {
 }
 util.wsBaseURL = function () {
   var baseURL = process.env.VUE_APP_API
+  if (!baseURL) return ''
   var param = baseURL.split('/')[3] || ''
   if (window.pluginsAll && window.pluginsAll.indexOf('dvadmin-tenants-web') !== -1 && (!param || baseURL.startsWith('/'))) {
     // 1.把127.0.0.1 替换成和前端一样域名
@@ -89,7 +109,13 @@ util.wsBaseURL = function () {
       baseURL = location.protocol + '//' + location.hostname + (location.port ? ':' : '') + location.port + baseURL
     }
   } else if (param !== '' || baseURL.startsWith('/')) {
-    baseURL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.hostname + (location.port ? ':' : '') + location.port + baseURL
+    // 相对路径：使用当前页面协议和主机拼接
+    if (baseURL.startsWith('/')) {
+      baseURL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.hostname + (location.port ? ':' : '') + location.port + baseURL
+    } else if (baseURL.startsWith('http://') || baseURL.startsWith('https://')) {
+      // 绝对路径：替换 http/https 为 ws/wss
+      baseURL = baseURL.replace(/^http/, 'ws')
+    }
   }
   if (!baseURL.endsWith('/')) {
     baseURL += '/'

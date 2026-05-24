@@ -27,7 +27,7 @@ import './install'
 // 配置vxe-table
 import 'xe-utils'
 import VXETable from 'vxe-table'
-import 'vxe-table/lib/style.css'
+import 'vxe-table/lib/index.css'
 
 // md5加密
 import md5 from 'js-md5'
@@ -35,11 +35,19 @@ import md5 from 'js-md5'
 // websocket
 import websocket from '@/api/websocket'
 import util from '@/libs/util'
-import VueCoreVideoPlayer from 'vue-core-video-player'
-// 引入echarts
-import * as echarts from 'echarts' // 注册echarts组件
+// 配置校验（开发环境早失败）
+import { initConfigValidation } from '@/libs/util.config'
+
 // 第三方组件
+import VueCoreVideoPlayer from 'vue-core-video-player'
 import VueClipboard from 'vue-clipboard2'
+import * as echarts from 'echarts' // 注册echarts组件
+
+// 初始化配置校验（在应用启动前执行）
+if (process.env.NODE_ENV !== 'production') {
+  initConfigValidation()
+}
+
 Vue.use(VueClipboard)
 Vue.use(VueCoreVideoPlayer)
 // 核心插件
