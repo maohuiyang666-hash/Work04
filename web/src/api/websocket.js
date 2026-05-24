@@ -29,15 +29,22 @@ function webSocketOnError (e) {
  */
 function webSocketOnMessage (e) {
   const data = JSON.parse(e.data)
-  const { refreshUnread, systemConfig } = data
+  const refreshUnread = data.refreshUnread || data.refresh_unread
+  const systemConfig = data.systemConfig || data.system_config
   if (refreshUnread) {
     // 更新消息通知条数
     store.dispatch('d2admin/messagecenter/setUnread')
   }
   if (systemConfig) {
     // 更新系统配置
-    this.$store.dispatch('d2admin/settings/load')
+    store.dispatch('d2admin/settings/load')
   }
+  
+  // 如果没有内容则不弹窗
+  if (!data.content) {
+    return
+  }
+
   if (data.contentType === 'SYSTEM') {
     ElementUI.Notification({
       title: '系统消息',
