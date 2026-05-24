@@ -124,7 +124,7 @@ class MessageCenterCreateSerializer(CustomModelSerializer):
                 "messagecenter": data.id,
                 "users": user
             })
-            if target_type in [1,2]:
+            if target_type in [0, 1, 2]:
                 room_name = f"user_{user}"
                 websocket_push(room_name, message={"sender": 'system', "contentType": 'SYSTEM',
                                                    "content": '您有一条新消息~', "refresh_unread": True})

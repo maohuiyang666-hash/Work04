@@ -1,0 +1,35 @@
+diff --git a/backend/dvadmin/system/views/message_center.py b/backend/dvadmin/system/views/message_center.py
+index 67e547b3..4d88b02c 100644
+--- a/backend/dvadmin/system/views/message_center.py
++++ b/backend/dvadmin/system/views/message_center.py
+@@ -124,7 +124,7 @@ class MessageCenterCreateSerializer(CustomModelSerializer):
+                 "messagecenter": data.id,
+                 "users": user
+             })
+-            if target_type in [1,2]:
++            if target_type in [0, 1, 2]:
+                 room_name = f"user_{user}"
+                 websocket_push(room_name, message={"sender": 'system', "contentType": 'SYSTEM',
+                                                    "content": '您有一条新消息~', "refresh_unread": True})
+diff --git a/web/src/api/websocket.js b/web/src/api/websocket.js
+index 4dbc3a39..7ba5b929 100644
+--- a/web/src/api/websocket.js
++++ b/web/src/api/websocket.js
+@@ -29,14 +29,14 @@ function webSocketOnError (e) {
+  */
+ function webSocketOnMessage (e) {
+   const data = JSON.parse(e.data)
+-  const { refreshUnread, systemConfig } = data
+-  if (refreshUnread) {
++  const { refresh_unread, systemConfig } = data
++  if (refresh_unread) {
+     // 更新消息通知条数
+     store.dispatch('d2admin/messagecenter/setUnread')
+   }
+   if (systemConfig) {
+     // 更新系统配置
+-    this.$store.dispatch('d2admin/settings/load')
++    store.dispatch('d2admin/settings/load')
+   }
+   if (data.contentType === 'SYSTEM') {
+     ElementUI.Notification({
